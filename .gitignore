@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build output
+.next/
+out/
+build/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# editor
+.vscode/
