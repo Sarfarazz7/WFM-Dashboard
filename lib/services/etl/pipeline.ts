@@ -96,17 +96,16 @@ export async function runWorkbookUploadPipeline(params: {
       };
     });
 
-    const extracted = await runStage(upload.id, "extract", "Read workbook", async () =>
-      extractWorkbook(params.buffer, upload.id).then((result) => ({
+    const extracted = await runStage(upload.id, "extract", "Read workbook", async () => {
+      const result = extractWorkbook(params.buffer);
+      return {
         result,
         details: {
           sheetCount: result.sheetNames.length,
           sheets: result.sheetNames,
-          rawRowCount: result.rawSheets.reduce((count, sheet) => count + sheet.rows.length, 0),
-          tempJsonPath: result.tempJsonPath,
         },
-      }))
-    );
+      };
+    });
 
     const parsed = await runStage(upload.id, "parse", "Parse sheets", async () => {
       const result = parseWorkbookSheets(extracted.workbook, params.reportDate);
@@ -171,7 +170,7 @@ export async function runWorkbookUploadPipeline(params: {
       const result = await loadWorkbookRows({
         uploadId: upload.id,
         fileName: params.file.name,
-        rawSheets: extracted.rawSheets,
+        workbook: extracted.workbook,
         rows: transformedRows,
         validationIssues,
       });
@@ -291,6 +290,8 @@ async function writeStageLog(params: {
 }) {
   const { error } = await logUploadStage(params);
   if (error) {
-    throw new Error(`Failed to write ${params.stage} upload log: ${error.message}`);
+    // Don't throw on logging failures — this prevents the pipeline from
+    // crashing and leaving uploads stuck in 'processing' forever.
+    console.error(`[ETL] Failed to write ${params.stage} upload log:`, error.message);
   }
 }

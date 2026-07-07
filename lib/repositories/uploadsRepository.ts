@@ -30,6 +30,8 @@ export interface UploadRecord {
 const UPLOAD_SELECT =
   "id, file_name, file_hash, file_size_bytes, storage_path, status, row_count, sheets, error_message, uploaded_at, completed_at";
 
+const STALE_PROCESSING_MINUTES = 10;
+
 export function isMissingUploadSchemaError(error: { code?: string; message?: string }) {
   const message = error.message?.toLowerCase() ?? "";
   return (
@@ -41,7 +43,38 @@ export function isMissingUploadSchemaError(error: { code?: string; message?: str
   );
 }
 
+/**
+ * Clean up uploads stuck in 'processing' for longer than STALE_PROCESSING_MINUTES.
+ * These are caused by serverless function timeouts or crashes that prevent the
+ * pipeline from reaching the markUploadCompleted/markUploadFailed call.
+ */
+async function cleanupStaleProcessingUploads(fileHash: string) {
+  const cutoff = new Date(Date.now() - STALE_PROCESSING_MINUTES * 60 * 1000).toISOString();
+
+  const { data: staleUploads } = await supabaseServer
+    .from("uploads")
+    .select("id")
+    .eq("file_hash", fileHash)
+    .eq("status", "processing")
+    .lt("uploaded_at", cutoff);
+
+  if (!staleUploads || staleUploads.length === 0) return;
+
+  for (const stale of staleUploads) {
+    await supabaseServer
+      .from("uploads")
+      .update({
+        status: "failed",
+        error_message: `Upload timed out — the server did not complete processing within ${STALE_PROCESSING_MINUTES} minutes. Please try again.`,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", stale.id);
+  }
+}
+
 export async function findUploadByHash(fileHash: string) {
+  await cleanupStaleProcessingUploads(fileHash);
+
   return supabaseServer
     .from("uploads")
     .select(UPLOAD_SELECT)
@@ -117,7 +150,7 @@ export async function markUploadFailed(params: {
   stage?: UploadStage;
   details?: Record<string, unknown>;
 }) {
-  await supabaseServer
+  const { error: updateError } = await supabaseServer
     .from("uploads")
     .update({
       status: "failed",
@@ -126,12 +159,19 @@ export async function markUploadFailed(params: {
     })
     .eq("id", params.uploadId);
 
+  if (updateError) {
+    console.error("[ETL] Failed to mark upload as failed:", updateError.message);
+  }
+
+  // Best-effort log — don't let a logging failure prevent the upload from being marked failed
   await logUploadStage({
     uploadId: params.uploadId,
     stage: params.stage ?? "load",
     level: "error",
     message: params.message,
     details: params.details,
+  }).catch((err) => {
+    console.error("[ETL] Failed to write failure log:", err.message);
   });
 }
 

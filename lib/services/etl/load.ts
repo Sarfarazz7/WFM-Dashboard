@@ -1,3 +1,4 @@
+import type * as XLSX from "xlsx";
 import type { ParsedRow } from "@/lib/parser";
 import {
   insertCompatibilityRows,
@@ -5,13 +6,10 @@ import {
   persistStagingRecords,
   persistValidationIssues,
 } from "@/lib/repositories/etlRepository";
-import type { RawSheetJson } from "./extract";
 import type { ValidationIssue } from "./transform";
 
 export interface LoadResult {
   rowCount: number;
-  rawSheetCount: number;
-  rawRowCount: number;
   stagingRecordCount: number;
   validationIssueCount: number;
 }
@@ -19,12 +17,10 @@ export interface LoadResult {
 export async function loadWorkbookRows(params: {
   uploadId: string;
   fileName: string;
-  rawSheets: RawSheetJson[];
+  workbook: XLSX.WorkBook;
   rows: ParsedRow[];
   validationIssues: ValidationIssue[];
 }): Promise<LoadResult> {
-  // Critical path: persist staging records, validation issues, and
-  // compatibility rows first. These are what the dashboard reads from.
   const [staging, validations, loaded] = await Promise.all([
     persistStagingRecords({
       uploadId: params.uploadId,
@@ -34,23 +30,24 @@ export async function loadWorkbookRows(params: {
       uploadId: params.uploadId,
       issues: params.validationIssues,
     }),
-    insertCompatibilityRows(params),
+    insertCompatibilityRows({
+      uploadId: params.uploadId,
+      fileName: params.fileName,
+      rows: params.rows,
+    }),
   ]);
 
   // Background: persist raw sheet rows (audit data only).
-  // This runs after the critical path returns so the user gets their
-  // result immediately. Failures are logged but don't block the upload.
-  const rawSheetCount = params.rawSheets.length;
-  const rawRowCount = params.rawSheets.reduce((sum, s) => sum + s.rows.length, 0);
+  // The workbook is passed directly — rawSheets are computed inside the
+  // background function so the expensive sheet_to_json conversion doesn't
+  // block the critical path.
   persistRawSheetsBackground({
     uploadId: params.uploadId,
-    rawSheets: params.rawSheets,
+    workbook: params.workbook,
   });
 
   return {
     rowCount: loaded.rowCount,
-    rawSheetCount,
-    rawRowCount,
     stagingRecordCount: staging.stagingRecordCount,
     validationIssueCount: validations.validationIssueCount,
   };

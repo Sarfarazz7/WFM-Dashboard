@@ -2,7 +2,8 @@ import { computeAgentDaySummaries, computeDailySummaries } from "@/lib/aggregate
 import type { ParsedRow } from "@/lib/parser";
 import { supabaseServer } from "@/lib/supabaseClient";
 import type { ValidationIssue } from "@/lib/services/etl/transform";
-import type { RawSheetJson } from "@/lib/services/etl/extract";
+import { computeRawSheets, type RawSheetJson } from "@/lib/services/etl/extract";
+import type { WorkBook } from "xlsx";
 
 const BATCH_SIZE = 1000;
 const RAW_BATCH_SIZE = 5000;
@@ -30,16 +31,21 @@ export interface MetricsResult {
  * dashboard reads from staging_records / excel_rows, not from raw_sheet_rows.
  * Running it in the background lets the critical path (staging + compatibility
  * rows) return to the user immediately.
+ *
+ * The workbook is passed directly instead of pre-computed rawSheets so that
+ * the expensive sheet_to_json conversion happens off the critical path.
  */
-export async function persistRawSheetsBackground(params: {
+export function persistRawSheetsBackground(params: {
   uploadId: string;
-  rawSheets: RawSheetJson[];
-}): Promise<void> {
-  try {
-    await persistRawSheets(params);
-  } catch (err) {
-    console.error("[ETL] Background raw sheet persistence failed:", err);
-  }
+  workbook: WorkBook;
+}): void {
+  // TODO: Re-enable raw sheet persistence once we can run computeRawSheets
+  // in a worker thread. For now, skip it — the 18-sheet workbook's
+  // sheet_to_json conversion blocks the event loop for too long on
+  // large files, which prevents aggregate/cache stages from completing.
+  // The dashboard reads from staging_records/excel_rows/daily_summary,
+  // not from raw_sheet_rows, so this is audit-only data.
+  void params;
 }
 
 export async function persistRawSheets(params: {
