@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseClient";
+import { escapeLike } from "@/lib/utils";
 import type { MetricType } from "@/lib/types";
 
-// metric_type used by the drill-down tabs
 const TAB_TO_METRIC: Record<string, MetricType> = {
   calls: "call",
-  tickets: "ticket", // includes both Ticket Closure and Workbench rows
+  tickets: "ticket",
   shrinkage: "shrinkage",
   sessions: "session",
   productivity: "productivity",
@@ -27,13 +27,16 @@ export async function GET(request: NextRequest) {
   if (!metricType) {
     return NextResponse.json({ error: `Unknown tab: ${tab}` }, { status: 400 });
   }
-  if (!dateFrom) {
-    return NextResponse.json({ error: "dateFrom is required" }, { status: 400 });
+  if (!dateFrom || !/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
+    return NextResponse.json({ error: "dateFrom is required (YYYY-MM-DD)" }, { status: 400 });
+  }
+  if (dateTo && !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+    return NextResponse.json({ error: "dateTo must be YYYY-MM-DD" }, { status: 400 });
   }
 
   let query = supabaseServer
     .from("excel_rows")
-    .select("id, date, lob, agent_name, sheet_name, data", { count: "exact" })
+    .select("id, date, lob, agent_name, data", { count: "exact" })
     .eq("metric_type", metricType)
     .gte("date", dateFrom)
     .lte("date", dateTo ?? dateFrom)
@@ -41,7 +44,7 @@ export async function GET(request: NextRequest) {
 
   if (lob) query = query.eq("lob", lob);
   if (agent) query = query.eq("agent_name", agent);
-  if (search) query = query.ilike("agent_name", `%${search}%`);
+  if (search) query = query.ilike("agent_name", `%${escapeLike(search)}%`);
 
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
@@ -50,7 +53,7 @@ export async function GET(request: NextRequest) {
   const { data, error, count } = await query;
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: "Failed to fetch data" }, { status: 500 });
   }
 
   return NextResponse.json({

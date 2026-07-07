@@ -4,6 +4,7 @@ export type MetricType = "call" | "ticket" | "shrinkage" | "session" | "producti
 
 export interface ExcelRow {
   id: string;
+  upload_id?: string | null;
   file_name: string;
   sheet_name: string;
   row_index: number;
@@ -53,9 +54,24 @@ export interface AgentDaySummary {
 // -----------------------------------------------------------------------
 
 export interface UploadResult {
+  uploadId?: string;
   fileName: string;
   sheets: string[];
   rowCount: number;
+  status?: UploadStatus;
+  validationIssueCount?: number;
+}
+
+export type UploadStatus = "processing" | "completed" | "completed_with_errors" | "failed";
+
+export interface UploadHistoryItem {
+  id?: string;
+  file_name: string;
+  uploaded_at: string;
+  status?: UploadStatus;
+  rowCount: number;
+  sheets?: string[];
+  error_message?: string | null;
 }
 
 export const DATE_PRESETS = [
@@ -66,3 +82,13 @@ export const DATE_PRESETS = [
   "custom",
 ] as const;
 export type DatePreset = (typeof DATE_PRESETS)[number];
+
+/**
+ * Canonical filter type used across all dashboard components and API routes.
+ */
+export interface DashboardFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  lob?: string;
+  agentName?: string;
+}

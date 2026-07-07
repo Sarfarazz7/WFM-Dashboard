@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { v4 as uuidv4 } from "uuid";
 import { supabaseServer } from "@/lib/supabaseClient";
-import { parseWorkbook } from "@/lib/parser";
-import { computeDailySummaries, computeAgentDaySummaries } from "@/lib/aggregates";
-import type { UploadResult } from "@/lib/types";
+import { runWorkbookUploadPipeline } from "@/lib/services/etl/pipeline";
+import {
+  isMissingUploadSchemaError,
+  listRecentUploads,
+} from "@/lib/repositories/uploadsRepository";
 
 export const runtime = "nodejs"; // xlsx parsing needs Node, not Edge
-export const maxDuration = 60; // seconds, generous for Vercel free tier
+export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   try {
@@ -36,103 +37,31 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // 1. Store the raw file in Supabase Storage for audit / reprocessing.
-    const storageName = `${uuidv4()}_${file.name.replace(/\s+/g, "_")}`;
-    const { error: storageError } = await supabaseServer.storage
-      .from("excel-files")
-      .upload(storageName, buffer, {
-        contentType: file.type || "application/octet-stream",
-      });
-
-    if (storageError) {
-      return NextResponse.json(
-        { error: `Failed to store file: ${storageError.message}` },
-        { status: 500 }
-      );
-    }
-
-    // 2. Parse only the configured sheets.
-    const { rows, sheetsFound } = parseWorkbook(buffer, reportDate);
-
-    if (rows.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "No matching sheets or data found. Check that the workbook has tabs named " +
-            "ACD Calls, Ticket Closure, Workbench, Shrinkage, Session Details, Prod Summary, or INT Summary.",
-        },
-        { status: 400 }
-      );
-    }
-
-    // 3. Insert raw rows into excel_rows. Batch inserts to stay well under
-    //    Supabase's request size limits on the free tier.
-    const insertRows = rows.map((r) => ({
-      file_name: file.name,
-      sheet_name: r.sheet_name,
-      row_index: r.row_index,
-      date: r.date,
-      lob: r.lob,
-      agent_name: r.agent_name,
-      metric_type: r.metric_type,
-      data: r.data,
-    }));
-
-    const BATCH_SIZE = 500;
-    for (let i = 0; i < insertRows.length; i += BATCH_SIZE) {
-      const batch = insertRows.slice(i, i + BATCH_SIZE);
-      const { error: insertError } = await supabaseServer.from("excel_rows").insert(batch);
-      if (insertError) {
-        return NextResponse.json(
-          { error: `Failed to insert rows: ${insertError.message}` },
-          { status: 500 }
-        );
-      }
-    }
-
-    // 4. Recompute daily_summary and agent_day_summary for affected dates.
-    const dailySummaries = computeDailySummaries(rows);
-    if (dailySummaries.length > 0) {
-      const { error: summaryError } = await supabaseServer
-        .from("daily_summary")
-        .upsert(dailySummaries, { onConflict: "date" });
-      if (summaryError) {
-        return NextResponse.json(
-          { error: `Rows saved, but summary update failed: ${summaryError.message}` },
-          { status: 500 }
-        );
-      }
-    }
-
-    const agentSummaries = computeAgentDaySummaries(rows);
-    if (agentSummaries.length > 0) {
-      const { error: agentSummaryError } = await supabaseServer
-        .from("agent_day_summary")
-        .upsert(agentSummaries, { onConflict: "date,agent_name" });
-      if (agentSummaryError) {
-        return NextResponse.json(
-          { error: `Rows saved, but agent summary update failed: ${agentSummaryError.message}` },
-          { status: 500 }
-        );
-      }
-    }
-
-    const result: UploadResult = {
-      fileName: file.name,
-      sheets: sheetsFound,
-      rowCount: rows.length,
-    };
-
+    const result = await runWorkbookUploadPipeline({ file, buffer, reportDate });
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: `Upload failed: ${message}` }, { status: 500 });
+    const status = message.includes("Duplicate upload") || message.includes("No matching sheets")
+      ? 400
+      : 500;
+    return NextResponse.json({ error: `Upload failed: ${message}` }, { status });
   }
 }
 
 // Lists previously uploaded files (distinct file_name + date + row count)
 // so the upload page can show recent history.
 export async function GET() {
+  const recentUploads = await listRecentUploads();
+  if (!recentUploads.error) {
+    return NextResponse.json({ files: recentUploads.data ?? [] });
+  }
+
+  if (!isMissingUploadSchemaError(recentUploads.error)) {
+    return NextResponse.json({ error: recentUploads.error.message }, { status: 500 });
+  }
+
+  // Backward-compatible fallback for databases that have not run the
+  // latest setup.sql yet.
   const { data, error } = await supabaseServer
     .from("excel_rows")
     .select("file_name, uploaded_at")

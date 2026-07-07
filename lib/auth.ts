@@ -21,15 +21,19 @@ function getSecret(): string {
   return secret;
 }
 
+let cachedHmacKey: CryptoKey | null = null;
+
 async function getHmacKey(): Promise<CryptoKey> {
+  if (cachedHmacKey) return cachedHmacKey;
   const secretBytes = new TextEncoder().encode(getSecret());
-  return crypto.subtle.importKey(
+  cachedHmacKey = await crypto.subtle.importKey(
     "raw",
     secretBytes,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign", "verify"]
   );
+  return cachedHmacKey;
 }
 
 function bufferToHex(buf: ArrayBuffer): string {

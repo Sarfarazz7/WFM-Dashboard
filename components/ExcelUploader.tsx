@@ -1,25 +1,21 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import type { UploadResult } from "@/lib/types";
-
-interface RecentFile {
-  file_name: string;
-  uploaded_at: string;
-  rowCount: number;
-}
+import { useState, useEffect, useCallback, useRef } from "react";
+import type { UploadHistoryItem, UploadResult } from "@/lib/types";
 
 type Status = "idle" | "uploading" | "processing" | "success" | "error";
 
+const UPLOAD_TIMEOUT_MS = 180_000; // 3 minutes
+
 export default function ExcelUploader() {
   const [file, setFile] = useState<File | null>(null);
-  const [reportDate, setReportDate] = useState<string>(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [reportDate, setReportDate] = useState<string>("");
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState<string>("");
   const [result, setResult] = useState<UploadResult | null>(null);
-  const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
+  const [recentFiles, setRecentFiles] = useState<UploadHistoryItem[]>([]);
+  const [elapsed, setElapsed] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadRecentFiles = useCallback(async () => {
     try {
@@ -34,8 +30,33 @@ export default function ExcelUploader() {
   }, []);
 
   useEffect(() => {
+    setReportDate(new Date().toISOString().slice(0, 10));
+  }, []);
+
+  useEffect(() => {
     loadRecentFiles();
   }, [loadRecentFiles]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  function startTimer() {
+    setElapsed(0);
+    timerRef.current = setInterval(() => {
+      setElapsed((prev) => prev + 1);
+    }, 1000);
+  }
+
+  function stopTimer() {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }
 
   async function handleUpload() {
     if (!file) {
@@ -52,6 +73,7 @@ export default function ExcelUploader() {
     setStatus("uploading");
     setMessage("Uploading…");
     setResult(null);
+    startTimer();
 
     try {
       const formData = new FormData();
@@ -61,7 +83,27 @@ export default function ExcelUploader() {
       setStatus("processing");
       setMessage("Processing…");
 
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+
+      let res: Response;
+      try {
+        res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+      } catch (fetchErr: any) {
+        if (fetchErr.name === "AbortError") {
+          throw new Error(
+            `Upload timed out after ${UPLOAD_TIMEOUT_MS / 1000} seconds. The file may be too large or the server is under heavy load.`
+          );
+        }
+        throw new Error("Network error — could not reach the server.");
+      } finally {
+        clearTimeout(timeout);
+      }
+
       const json = await res.json();
 
       if (!res.ok) {
@@ -73,14 +115,25 @@ export default function ExcelUploader() {
       setStatus("success");
       setResult(json);
       setMessage(
-        `Upload successful: ${json.rowCount} rows, sheets: [${json.sheets.join(", ")}]`
+        `Upload successful: ${json.rowCount} rows, sheets: [${json.sheets.join(", ")}]${
+          json.validationIssueCount ? `, warnings: ${json.validationIssueCount}` : ""
+        }`
       );
       setFile(null);
       loadRecentFiles();
     } catch (err) {
       setStatus("error");
       setMessage(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      stopTimer();
     }
+  }
+
+  function formatElapsed(seconds: number): string {
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}m ${s}s`;
   }
 
   return (
@@ -102,7 +155,7 @@ export default function ExcelUploader() {
             value={reportDate}
             onChange={(e) => setReportDate(e.target.value)}
           />
-          <p className="text-xs text-mist-500 mt-1">
+          <p className="text-xs text-mist-400 mt-1">
             Shrinkage and Prod Summary don&apos;t carry their own date column, so this date is
             applied to those two sheets. The other sheets use their own per-row timestamps.
           </p>
@@ -130,17 +183,34 @@ export default function ExcelUploader() {
         </div>
 
         {file && status === "idle" && (
-          <p className="text-xs text-mist-500 mt-2">Selected: {file.name}</p>
+          <p className="text-xs text-mist-400 mt-2">Selected: {file.name}</p>
         )}
 
-        {message && (
+        {(status === "uploading" || status === "processing") && (
+          <div className="mt-4 rounded-lg border border-ink-600 bg-ink-700/50 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-teal-400" />
+              <p className="text-sm text-mist-400">
+                {status === "uploading" ? "Uploading file…" : "Processing workbook…"}
+              </p>
+              <span className="ml-auto text-xs text-mist-400 font-mono">
+                {formatElapsed(elapsed)}
+              </span>
+            </div>
+            {status === "processing" && elapsed > 10 && (
+              <p className="mt-1 text-xs text-mist-400">
+                Large files may take a minute. The upload will timeout after 90 seconds.
+              </p>
+            )}
+          </div>
+        )}
+
+        {message && (status === "success" || status === "error") && (
           <p
             className={`text-sm mt-4 rounded-lg px-3 py-2 border ${
               status === "error"
                 ? "text-metric-abandon bg-metric-abandon/10 border-metric-abandon/30"
-                : status === "success"
-                ? "text-metric-csat bg-metric-csat/10 border-metric-csat/30"
-                : "text-mist-400 bg-ink-700/50 border-ink-600"
+                : "text-metric-csat bg-metric-csat/10 border-metric-csat/30"
             }`}
           >
             {message}
@@ -151,13 +221,14 @@ export default function ExcelUploader() {
       <div className="card">
         <h2 className="text-sm font-medium text-mist-200 mb-3">Recently uploaded files</h2>
         {recentFiles.length === 0 ? (
-          <p className="text-sm text-mist-500">No files uploaded yet.</p>
+          <p className="text-sm text-mist-400">No files uploaded yet.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-mist-500 border-b border-ink-600">
+              <tr className="text-left text-mist-400 border-b border-ink-600">
                 <th className="pb-2 font-normal">File name</th>
                 <th className="pb-2 font-normal">Uploaded</th>
+                <th className="pb-2 font-normal">Status</th>
                 <th className="pb-2 font-normal text-right">Rows</th>
               </tr>
             </thead>
@@ -168,6 +239,7 @@ export default function ExcelUploader() {
                   <td className="py-2 text-mist-400">
                     {new Date(f.uploaded_at).toLocaleString()}
                   </td>
+                  <td className="py-2 text-mist-400">{f.status ?? "completed"}</td>
                   <td className="py-2 text-right text-mist-200">{f.rowCount}</td>
                 </tr>
               ))}

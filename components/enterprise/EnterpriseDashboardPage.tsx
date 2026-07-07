@@ -1,0 +1,497 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { LinePanel, AreaPanel, BarPanel, PiePanel, ChartGrid } from "./ChartPanels";
+import AiInsightsPanel from "@/components/AiInsightsPanel";
+import NaturalLanguageQuery from "@/components/NaturalLanguageQuery";
+import ExcelUploader from "@/components/ExcelUploader";
+
+type PageKind =
+  | "executive"
+  | "agents"
+  | "attendance"
+  | "productivity"
+  | "shrinkage"
+  | "historical"
+  | "reports"
+  | "settings";
+
+interface Props {
+  kind: PageKind;
+  title: string;
+  description: string;
+}
+
+interface Filters {
+  dateFrom: string;
+  dateTo: string;
+  lob: string;
+  agent: string;
+}
+
+function getFallbackDates() {
+  const today = new Date().toISOString().slice(0, 10);
+  const startDate = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return { dateFrom: startDate, dateTo: today };
+}
+
+export default function EnterpriseDashboardPage({ kind, title, description }: Props) {
+  const [filters, setFilters] = useState<Filters>({ dateFrom: "", dateTo: "", lob: "", agent: "" });
+
+  useEffect(() => {
+    async function loadDefaultDates() {
+      try {
+        const res = await fetch("/api/dates");
+        const json = await res.json();
+        const dates: string[] = json.dates ?? [];
+        if (dates.length > 0) {
+          const dateTo = dates[0];
+          const dateFrom = dates[Math.min(6, dates.length - 1)];
+          setFilters((prev) => {
+            if (prev.dateFrom === "" && prev.dateTo === "") {
+              return { ...prev, dateFrom, dateTo };
+            }
+            return prev;
+          });
+        } else {
+          const fallback = getFallbackDates();
+          setFilters((prev) => {
+            if (prev.dateFrom === "" && prev.dateTo === "") {
+              return { ...prev, dateFrom: fallback.dateFrom, dateTo: fallback.dateTo };
+            }
+            return prev;
+          });
+        }
+      } catch {
+        const fallback = getFallbackDates();
+        setFilters((prev) => {
+          if (prev.dateFrom === "" && prev.dateTo === "") {
+            return { ...prev, dateFrom: fallback.dateFrom, dateTo: fallback.dateTo };
+          }
+          return prev;
+        });
+      }
+    }
+    loadDefaultDates();
+  }, []);
+  const [data, setData] = useState<Record<string, any>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = buildParams(filters);
+        const endpoints = endpointsFor(kind);
+        const responses = await Promise.all(
+          endpoints.map(async ([key, path]) => {
+            const res = await fetch(`${path}?${params}`, { signal: controller.signal });
+            const json = await res.json();
+            if (!res.ok || json.error) throw new Error(json.error || `Failed to load ${path}`);
+            return [key, json] as const;
+          })
+        );
+        setData(Object.fromEntries(responses));
+      } catch (err) {
+        if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Failed to load dashboard");
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    load();
+    return () => controller.abort();
+  }, [filters, kind]);
+
+  const summary = data.summary?.summary ?? {};
+  const trends = data.trends?.rows ?? data.overview?.trends ?? [];
+  const agents = data.agents?.rows ?? [];
+  const teams = data.team?.rows ?? data.overview?.topTeams ?? [];
+  const calls = data.calls?.rows ?? [];
+  const shrinkage = data.shrinkage?.rows ?? [];
+  const attendance = data.attendance?.rows ?? [];
+  const uploads = data.uploads?.rows ?? [];
+  const report = data.report ?? null;
+
+  const lobPie = useMemo(() => buildLobPie(agents), [agents]);
+  const heatmapRows = useMemo(() => buildHeatmap(agents), [agents]);
+
+  if (kind === "settings") {
+    return (
+      <PageFrame title={title} description={description} filters={filters} setFilters={setFilters}>
+        <StatusMessage loading={loading} error={error} />
+        <KpiGrid summary={summary} loading={loading} />
+        <Section title="API and data status">
+          <DataTable
+            rows={uploads}
+            loading={loading}
+            columns={[
+              ["file_name", "File"],
+              ["status", "Status"],
+              ["row_count", "Rows"],
+              ["uploaded_at", "Uploaded"],
+            ]}
+          />
+        </Section>
+      </PageFrame>
+    );
+  }
+
+  return (
+    <PageFrame title={title} description={description} filters={filters} setFilters={setFilters}>
+      <StatusMessage loading={loading} error={error} />
+      <KpiGrid summary={summary} loading={loading} />
+
+      {kind === "executive" && (
+        <>
+          <ChartGrid>
+            <LinePanel title="AHT and shrinkage trend" data={trends} />
+            <AreaPanel title="Calls handled over time" data={trends} />
+            <BarPanel title="Top teams by score" data={teams} xKey="name" barKey="score" />
+            <PiePanel title="Agent distribution by LOB" data={lobPie} />
+          </ChartGrid>
+          <HeatmapPanel rows={heatmapRows} loading={loading} />
+          <NaturalLanguageQuery dateFrom={filters.dateFrom} dateTo={filters.dateTo} lob={filters.lob} />
+          <AiInsightsPanel />
+        </>
+      )}
+
+      {kind === "agents" && (
+        <>
+          <ChartGrid>
+            <BarPanel title="Agent ranking score" data={data.agents?.ranking ?? []} xKey="name" barKey="score" />
+            <LinePanel title="AHT trend" data={trends} />
+          </ChartGrid>
+          <Section title="Agent performance table">
+            <DataTable
+              rows={agents}
+              loading={loading}
+              columns={[
+                ["agent_name", "Agent"],
+                ["lob", "LOB"],
+                ["aht", "AHT"],
+                ["shrinkage_pct", "Shrinkage %"],
+                ["breaks_count", "Breaks"],
+              ]}
+            />
+          </Section>
+          <NaturalLanguageQuery dateFrom={filters.dateFrom} dateTo={filters.dateTo} lob={filters.lob} />
+          <AiInsightsPanel />
+        </>
+      )}
+
+      {kind === "attendance" && (
+        <>
+          <ChartGrid>
+            <LinePanel title="Attendance source trend" data={trends} />
+            <BarPanel title="Attendance rows by LOB" data={buildRowsByLob(attendance)} xKey="lob" barKey="count" />
+          </ChartGrid>
+          <Section title="Attendance records">
+            <DataTable rows={attendance} loading={loading} columns={metricColumns("attendance")} />
+          </Section>
+        </>
+      )}
+
+      {kind === "productivity" && (
+        <>
+          <ChartGrid>
+            <BarPanel title="Productivity ranking" data={data.agents?.ranking ?? []} xKey="name" barKey="utilization" />
+            <AreaPanel title="Volume trend" data={trends} />
+          </ChartGrid>
+          <HeatmapPanel rows={heatmapRows} loading={loading} />
+        </>
+      )}
+
+      {kind === "shrinkage" && (
+        <>
+          <ChartGrid>
+            <LinePanel title="Shrinkage trend" data={trends} />
+            <BarPanel title="Shrinkage rows by LOB" data={buildRowsByLob(shrinkage)} xKey="lob" barKey="count" />
+          </ChartGrid>
+          <Section title="Shrinkage detail">
+            <DataTable rows={shrinkage} loading={loading} columns={metricColumns("shrinkage")} />
+          </Section>
+        </>
+      )}
+
+      {kind === "historical" && (
+        <>
+          <ChartGrid>
+            <AreaPanel title="Historical call volume" data={trends} />
+            <LinePanel title="Historical service metrics" data={trends} />
+          </ChartGrid>
+          <Section title="Daily historical rows">
+            <DataTable
+              rows={trends}
+              loading={loading}
+              columns={[
+                ["date", "Date"],
+                ["total_calls_offered", "Offered"],
+                ["total_calls_answered", "Answered"],
+                ["abandonment_pct", "Abandonment %"],
+                ["shrinkage_pct", "Shrinkage %"],
+              ]}
+            />
+          </Section>
+        </>
+      )}
+
+      {kind === "reports" && (
+        <Section title="Report Center">
+          <p className="text-sm text-mist-400">
+            The Report Center has moved to its own page.{" "}
+            <a href="/dashboard/reports" className="text-blue-400 hover:underline">
+              Go to Report Center
+            </a>
+          </p>
+        </Section>
+      )}
+    </PageFrame>
+  );
+}
+
+export function UploadCenterPage() {
+  return (
+    <div className="space-y-5">
+      <PageHeading title="Upload Center" description="Import workbooks, track ETL status, and review upload history." />
+      <ExcelUploader />
+    </div>
+  );
+}
+
+function PageFrame({
+  title,
+  description,
+  filters,
+  setFilters,
+  children,
+}: {
+  title: string;
+  description: string;
+  filters: Filters;
+  setFilters: (filters: Filters) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-5">
+      <PageHeading title={title} description={description} />
+      <FilterBar filters={filters} setFilters={setFilters} />
+      {children}
+    </div>
+  );
+}
+
+function PageHeading({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h1 className="text-xl font-display font-semibold text-mist-50">{title}</h1>
+        <p className="mt-1 text-sm text-mist-400">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function FilterBar({ filters, setFilters }: { filters: Filters; setFilters: (filters: Filters) => void }) {
+  return (
+    <div className="grid gap-3 border border-ink-600/60 bg-ink-900 p-4 sm:grid-cols-2 lg:grid-cols-4">
+      <Field label="From" type="date" value={filters.dateFrom} onChange={(dateFrom) => setFilters({ ...filters, dateFrom })} />
+      <Field label="To" type="date" value={filters.dateTo} onChange={(dateTo) => setFilters({ ...filters, dateTo })} />
+      <Field label="LOB" value={filters.lob} placeholder="All teams" onChange={(lob) => setFilters({ ...filters, lob })} />
+      <Field label="Agent" value={filters.agent} placeholder="All agents" onChange={(agent) => setFilters({ ...filters, agent })} />
+    </div>
+  );
+}
+
+function Field(props: {
+  label: string;
+  value: string;
+  type?: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label>
+      <span className="label-eyebrow mb-1 block">{props.label}</span>
+      <input
+        type={props.type ?? "text"}
+        className="input w-full"
+        value={props.value}
+        placeholder={props.placeholder}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function StatusMessage({ loading, error }: { loading: boolean; error: string | null }) {
+  if (loading) return <p className="border border-ink-600 bg-ink-800 px-3 py-2 text-sm text-mist-400">Loading live dashboard data...</p>;
+  if (error) return <p className="border border-metric-abandon/30 bg-metric-abandon/10 px-3 py-2 text-sm text-metric-abandon">{error}</p>;
+  return null;
+}
+
+function KpiGrid({ summary, loading }: { summary: Record<string, any>; loading: boolean }) {
+  const cards = [
+    ["AHT", summary.aht?.value, "sec"],
+    ["Occupancy", summary.occupancy?.value, "%"],
+    ["Utilization", summary.utilization?.value, "%"],
+    ["Shrinkage", summary.shrinkage?.value, "%"],
+    ["Attendance", summary.attendance?.value, "%"],
+    ["Calls/hour", summary.callsPerHour?.value, ""],
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+      {cards.map(([label, value, suffix]) => (
+        <div key={label} className="border border-ink-600/60 bg-ink-800 p-4">
+          <p className="label-eyebrow">{label}</p>
+          <p className="mt-2 min-h-8 text-2xl font-display font-semibold text-mist-50">
+            {loading ? <span className="block h-7 w-16 animate-pulse bg-ink-700" /> : value ?? "-"}
+            {!loading && value !== undefined ? suffix : ""}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HeatmapPanel({ rows, loading }: { rows: Array<{ agent: string; values: number[] }>; loading: boolean }) {
+  return (
+    <Section title="Agent heatmap">
+      {loading ? <SkeletonRows /> : rows.length === 0 ? <EmptyState /> : (
+        <div className="overflow-x-auto">
+          <div className="min-w-[720px] space-y-2">
+            {rows.slice(0, 12).map((row) => (
+              <div key={row.agent} className="grid grid-cols-[160px_repeat(7,minmax(44px,1fr))] items-center gap-1 text-xs">
+                <div className="truncate text-mist-300">{row.agent}</div>
+                {row.values.map((value, index) => (
+                  <div
+                    key={index}
+                    className="h-8 border border-ink-700"
+                    style={{ backgroundColor: `rgba(45, 212, 200, ${Math.max(0.08, Math.min(0.75, value / 100))})` }}
+                    title={`${value}%`}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="border border-ink-600/60 bg-ink-800 p-4">
+      <h2 className="mb-3 text-sm font-medium text-mist-200">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function DataTable({ rows, columns, loading }: { rows: any[]; columns: [string, string][]; loading: boolean }) {
+  if (loading) return <SkeletonRows />;
+  if (rows.length === 0) return <EmptyState />;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[720px] text-sm">
+        <thead>
+          <tr className="border-b border-ink-600 text-left text-mist-400">
+            {columns.map(([, label]) => <th key={label} className="pb-2 pr-4 font-normal">{label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 25).map((row, index) => (
+            <tr key={row.id ?? `${row.date ?? "row"}-${index}`} className="border-b border-ink-700/70 last:border-0">
+              {columns.map(([key]) => (
+                <td key={key} className="py-2 pr-4 text-mist-300">{formatCell(readCell(row, key))}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SkeletonRows() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 5 }).map((_, index) => <div key={index} className="h-9 animate-pulse bg-ink-700" />)}
+    </div>
+  );
+}
+
+function EmptyState() {
+  return <div className="flex h-full min-h-32 items-center justify-center text-sm text-mist-400">No records found for the selected filters.</div>;
+}
+
+function buildParams(filters: Filters) {
+  const params = new URLSearchParams({
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    page: "1",
+    pageSize: "50",
+  });
+  if (filters.lob) params.set("lob", filters.lob);
+  if (filters.agent) params.set("agent", filters.agent);
+  return params.toString();
+}
+
+function endpointsFor(kind: PageKind): Array<[string, string]> {
+  const base: Array<[string, string]> = [
+    ["summary", "/api/dashboard/summary"],
+    ["trends", "/api/dashboard/trends"],
+  ];
+  if (kind === "executive") return [...base, ["overview", "/api/dashboard"], ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"]];
+  if (kind === "agents") return [...base, ["agents", "/api/dashboard/agents"]];
+  if (kind === "attendance") return [...base, ["attendance", "/api/dashboard/attendance"]];
+  if (kind === "productivity") return [...base, ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"]];
+  if (kind === "shrinkage") return [...base, ["shrinkage", "/api/dashboard/shrinkage"]];
+  if (kind === "historical") return [...base, ["calls", "/api/dashboard/calls"], ["shrinkage", "/api/dashboard/shrinkage"]];
+  if (kind === "reports") return [...base, ["report", "/api/dashboard/report"], ["calls", "/api/dashboard/calls"]];
+  return [...base, ["uploads", "/api/dashboard/uploads"]];
+}
+
+function buildLobPie(rows: any[]) {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.lob ?? "Unassigned", (counts.get(row.lob ?? "Unassigned") ?? 0) + 1);
+  return Array.from(counts.entries()).map(([name, value]) => ({ name, value }));
+}
+
+function buildReportTeamPie(rows: any[]) {
+  return rows.slice(0, 8).map((row) => ({ name: row.name, value: row.score }));
+}
+
+function buildRowsByLob(rows: any[]) {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(row.lob ?? row.data?.lob ?? "Unassigned", (counts.get(row.lob ?? row.data?.lob ?? "Unassigned") ?? 0) + 1);
+  return Array.from(counts.entries()).map(([lob, count]) => ({ lob, count }));
+}
+
+function buildHeatmap(rows: any[]) {
+  return rows.slice(0, 20).map((row: any) => ({
+    agent: row.agent_name ?? row.name ?? "Unknown",
+    values: [row.aht, row.shrinkage_pct, row.abandonment_pct, row.breaks_count, row.avg_break_duration, row.csat_avg, row.hold]
+      .map((value) => Math.abs(Number(value ?? 0)) % 100),
+  }));
+}
+
+function metricColumns(type: "calls" | "shrinkage" | "attendance"): [string, string][] {
+  if (type === "calls") return [["date", "Date"], ["agent_name", "Agent"], ["data._offered", "Offered"], ["data._answered", "Answered"], ["data._aht", "AHT"]];
+  return [["date", "Date"], ["lob", "LOB"], ["data.scheduled", "Scheduled"], ["data.present", "Present"], ["data.shrinkage_pct", "Shrinkage"]];
+}
+
+function readCell(row: any, key: string) {
+  return key.split(".").reduce((value, part) => value?.[part], row);
+}
+
+function formatCell(value: unknown) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "number") return Math.round(value * 100) / 100;
+  if (typeof value === "string" && value.includes("T")) return new Date(value).toLocaleString();
+  return String(value);
+}

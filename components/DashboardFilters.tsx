@@ -105,7 +105,7 @@ export default function DashboardFilters({ filters, onChange }: Props) {
               value={filters.dateFrom}
               onChange={(e) => onChange({ ...filters, dateFrom: e.target.value })}
             />
-            <span className="text-mist-500 text-xs">to</span>
+            <span className="text-mist-400 text-xs">to</span>
             <input
               type="date"
               className="input text-xs py-1.5"
@@ -170,7 +170,7 @@ export default function DashboardFilters({ filters, onChange }: Props) {
 
         {(filters.lob || filters.agent) && (
           <button
-            className="text-xs text-mist-500 hover:text-mist-300 underline mt-5"
+            className="text-xs text-mist-400 hover:text-mist-200 underline mt-5"
             onClick={() => {
               setAgentQuery("");
               onChange({ ...filters, lob: null, agent: null });

@@ -33,7 +33,8 @@ function LoginForm() {
         setError("Invalid username or password");
         return;
       }
-      const dest = searchParams.get("from") || "/dashboard";
+      const rawDest = searchParams.get("from") || "/dashboard";
+      const dest = rawDest.startsWith("/") && !rawDest.startsWith("//") ? rawDest : "/dashboard";
       router.push(dest);
       router.refresh();
     } catch {
@@ -64,7 +65,7 @@ function LoginForm() {
           <h1 className="text-xl font-display font-semibold text-mist-50">
             WFM Breaksheet Dashboard
           </h1>
-          <p className="text-sm text-mist-500 mt-1">Sign in with your team credentials</p>
+          <p className="text-sm text-mist-400 mt-1">Sign in with your team credentials</p>
         </div>
 
         <form onSubmit={handleSubmit} className="card">
@@ -110,7 +111,7 @@ function LoginForm() {
           </div>
         </form>
 
-        <p className="text-center text-xs text-mist-500 mt-4">
+        <p className="text-center text-xs text-mist-400 mt-4">
           Forgot password? Contact your admin.
         </p>
       </div>

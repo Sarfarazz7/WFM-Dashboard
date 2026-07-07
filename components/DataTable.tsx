@@ -82,7 +82,7 @@ export default function DataTable({ filters }: { filters: Filters }) {
     if (rows.length === 0) return [];
     const keys = new Set<string>();
     rows.forEach((r) => Object.keys(r.data).forEach((k) => keys.add(k)));
-    return Array.from(keys).slice(0, 6); // keep the table readable; full row still in export
+    return Array.from(keys).slice(0, 6);
   }, [rows]);
 
   const sortedRows = useMemo(() => {
@@ -102,16 +102,24 @@ export default function DataTable({ filters }: { filters: Filters }) {
     URL.revokeObjectURL(url);
   }
 
+  function handleSortKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setSortAsc(!sortAsc);
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="card">
-      {/* Tabs */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-        <div className="flex gap-1 flex-wrap">
+        <div role="tablist" aria-label="Data category" className="flex gap-1 flex-wrap">
           {TABS.map((t) => (
             <button
               key={t.key}
+              role="tab"
+              aria-selected={tab === t.key}
               onClick={() => setTab(t.key)}
               className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
                 tab === t.key
@@ -125,7 +133,9 @@ export default function DataTable({ filters }: { filters: Filters }) {
         </div>
 
         <div className="flex items-center gap-2">
+          <label htmlFor="dt-search" className="sr-only">Search by agent</label>
           <input
+            id="dt-search"
             type="text"
             placeholder="Search by agent…"
             className="input text-xs py-1.5 w-48"
@@ -153,17 +163,21 @@ export default function DataTable({ filters }: { filters: Filters }) {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-mist-500 border-b border-ink-600">
+                <tr className="text-left text-mist-400 border-b border-ink-600">
                   <th
                     className="pb-2 pr-4 font-normal cursor-pointer select-none"
+                    role="columnheader"
+                    aria-sort={sortAsc ? "ascending" : "descending"}
+                    tabIndex={0}
                     onClick={() => setSortAsc(!sortAsc)}
+                    onKeyDown={handleSortKeyDown}
                   >
                     Date {sortAsc ? "↑" : "↓"}
                   </th>
-                  <th className="pb-2 pr-4 font-normal">LOB</th>
-                  <th className="pb-2 pr-4 font-normal">Agent</th>
+                  <th className="pb-2 pr-4 font-normal" role="columnheader">LOB</th>
+                  <th className="pb-2 pr-4 font-normal" role="columnheader">Agent</th>
                   {columns.map((c) => (
-                    <th key={c} className="pb-2 pr-4 font-normal">
+                    <th key={c} className="pb-2 pr-4 font-normal" role="columnheader">
                       {c}
                     </th>
                   ))}
@@ -186,7 +200,7 @@ export default function DataTable({ filters }: { filters: Filters }) {
             </table>
           </div>
 
-          <div className="flex items-center justify-between mt-4 text-xs text-mist-500">
+          <div className="flex items-center justify-between mt-4 text-xs text-mist-400">
             <span>
               Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
             </span>

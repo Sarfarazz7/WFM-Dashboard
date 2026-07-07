@@ -22,8 +22,10 @@ const config: Config = {
           50: "#f7f9fc",
           100: "#eef2f8",
           200: "#dde5f0",
+          300: "#b8c4db",
           400: "#9aa8c2",
           500: "#6b7a99",
+          600: "#516380",
         },
         teal: {
           400: "#2dd4c8",
@@ -40,9 +42,9 @@ const config: Config = {
         },
       },
       fontFamily: {
-        display: ["'Sora'", "system-ui", "sans-serif"],
-        body: ["'Inter'", "system-ui", "sans-serif"],
-        mono: ["'JetBrains Mono'", "monospace"],
+        display: ["var(--font-sora)", "system-ui", "sans-serif"],
+        body: ["var(--font-inter)", "system-ui", "sans-serif"],
+        mono: ["var(--font-jetbrains)", "monospace"],
       },
       boxShadow: {
         card: "0 1px 2px rgba(8,15,30,0.06), 0 8px 24px -12px rgba(8,15,30,0.25)",
