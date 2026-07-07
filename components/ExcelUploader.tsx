@@ -2,26 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { UploadHistoryItem, UploadResult } from "@/lib/types";
-import { supabaseBrowser } from "@/lib/supabaseBrowserClient";
 
 type Status = "idle" | "uploading" | "processing" | "success" | "error";
 
 const UPLOAD_TIMEOUT_MS = 180_000; // 3 minutes
-const STORAGE_BUCKET = "excel-files";
-
-function sanitizeFileName(fileName: string): string {
-  return fileName
-    .trim()
-    .replace(/[^\w.\-]+/g, "_")
-    .replace(/_+/g, "_")
-    .slice(0, 160);
-}
-
-function generateStoragePath(fileName: string): string {
-  const timestamp = Date.now();
-  const random = Math.random().toString(36).slice(2, 10);
-  return `uploads/${timestamp}-${random}/${sanitizeFileName(fileName)}`;
-}
 
 async function parseApiResponse(res: Response) {
   const contentType = res.headers.get("content-type") ?? "";
@@ -107,16 +91,24 @@ export default function ExcelUploader() {
     startTimer();
 
     try {
-      const storagePath = generateStoragePath(file.name);
+      // Step 1: Get a signed upload URL from the server
+      const signedUrlRes = await fetch(
+        `/api/upload/signed-url?fileName=${encodeURIComponent(file.name)}`
+      );
+      const { signedUrl, storagePath } = await parseApiResponse(signedUrlRes);
 
-      const { error: uploadError } = await supabaseBrowser.storage
-        .from(STORAGE_BUCKET)
-        .upload(storagePath, file, {
-          contentType: file.type || "application/octet-stream",
-        });
+      // Step 2: Upload the file directly to the signed URL (bypasses RLS)
+      const uploadRes = await fetch(signedUrl, {
+        method: "PUT",
+        body: file,
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+        },
+      });
 
-      if (uploadError) {
-        throw new Error(`Storage upload failed: ${uploadError.message}`);
+      if (!uploadRes.ok) {
+        const errorText = await uploadRes.text();
+        throw new Error(`Storage upload failed (${uploadRes.status}): ${errorText.slice(0, 200)}`);
       }
 
       setStatus("processing");

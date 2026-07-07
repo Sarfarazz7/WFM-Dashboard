@@ -1,6 +1,7 @@
 -- =====================================================================
 -- WFM Breaksheet Dashboard — Supabase setup
 -- Run this whole file in: Supabase Dashboard -> SQL Editor -> New query
+-- After any changes to this file, re-run it in SQL Editor to apply them.
 -- =====================================================================
 
 -- Needed for gen_random_uuid()
@@ -269,8 +270,11 @@ alter table agent_day_summary enable row level security;
 -- or write. This is intentionally locked down for a 5-person internal
 -- tool where the browser never talks to Supabase directly.
 
--- Storage: same idea — deny public access, only service_role (used in
+-- Storage: deny public access, only service_role (used in
 -- the /api/upload route) can write/read the excel-files bucket.
+-- The browser never talks to Supabase directly — file uploads go
+-- through server-generated signed URLs (GET /api/upload/signed-url),
+-- which bypass RLS entirely. No anon/storage policies are needed.
 create policy if not exists "service role full access to excel-files"
   on storage.objects for all
   using (bucket_id = 'excel-files' and auth.role() = 'service_role')
