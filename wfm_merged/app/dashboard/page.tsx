@@ -8,6 +8,21 @@ import SummaryCards from "@/components/SummaryCards";
 import DashboardCharts from "@/components/DashboardCharts";
 import DataTable from "@/components/DataTable";
 
+async function parseApiResponse(res: Response) {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const text = await res.text();
+    throw new Error(
+      `Server returned a non-JSON response (status ${res.status}): ${text.slice(0, 200)}`
+    );
+  }
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.error ?? `Request failed with status ${res.status}`);
+  }
+  return json;
+}
+
 const today = format(new Date(), "yyyy-MM-dd");
 
 const DEFAULT_FILTERS: Filters = {
@@ -30,7 +45,7 @@ export default function DashboardPage() {
     async function loadLatestDate() {
       try {
         const res = await fetch("/api/dates");
-        const json = await res.json();
+        const json = await parseApiResponse(res);
         const latestDate = json.dates?.[0];
         if (!cancelled && latestDate && latestDate !== today) {
           setFilters((current) =>
@@ -58,13 +73,8 @@ export default function DashboardPage() {
       if (f.lob) params.set("lob", f.lob);
       if (f.agent) params.set("agent", f.agent);
       const res = await fetch(`/api/summary?${params.toString()}`);
-      const json = await res.json();
-      if (json.error) {
-        setError(json.error);
-        setSummary(null);
-      } else {
-        setSummary(json);
-      }
+      const json = await parseApiResponse(res);
+      setSummary(json);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load summary");
     } finally {

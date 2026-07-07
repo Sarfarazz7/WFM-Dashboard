@@ -2,10 +2,41 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { UploadHistoryItem, UploadResult } from "@/lib/types";
+import { supabaseBrowser } from "@/lib/supabaseBrowserClient";
 
 type Status = "idle" | "uploading" | "processing" | "success" | "error";
 
 const UPLOAD_TIMEOUT_MS = 180_000; // 3 minutes
+const STORAGE_BUCKET = "excel-files";
+
+function sanitizeFileName(fileName: string): string {
+  return fileName
+    .trim()
+    .replace(/[^\w.\-]+/g, "_")
+    .replace(/_+/g, "_")
+    .slice(0, 160);
+}
+
+function generateStoragePath(fileName: string): string {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).slice(2, 10);
+  return `uploads/${timestamp}-${random}/${sanitizeFileName(fileName)}`;
+}
+
+async function parseApiResponse(res: Response) {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const text = await res.text();
+    throw new Error(
+      `Server returned a non-JSON response (status ${res.status}): ${text.slice(0, 200)}`
+    );
+  }
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.error ?? `Upload failed with status ${res.status}`);
+  }
+  return json;
+}
 
 export default function ExcelUploader() {
   const [file, setFile] = useState<File | null>(null);
@@ -71,17 +102,25 @@ export default function ExcelUploader() {
     }
 
     setStatus("uploading");
-    setMessage("Uploading…");
+    setMessage("Uploading file to storage…");
     setResult(null);
     startTimer();
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("reportDate", reportDate);
+      const storagePath = generateStoragePath(file.name);
+
+      const { error: uploadError } = await supabaseBrowser.storage
+        .from(STORAGE_BUCKET)
+        .upload(storagePath, file, {
+          contentType: file.type || "application/octet-stream",
+        });
+
+      if (uploadError) {
+        throw new Error(`Storage upload failed: ${uploadError.message}`);
+      }
 
       setStatus("processing");
-      setMessage("Processing…");
+      setMessage("Processing workbook…");
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
@@ -90,13 +129,19 @@ export default function ExcelUploader() {
       try {
         res = await fetch("/api/upload", {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            storagePath,
+            fileName: file.name,
+            reportDate,
+            fileSizeBytes: file.size,
+          }),
           signal: controller.signal,
         });
       } catch (fetchErr: any) {
         if (fetchErr.name === "AbortError") {
           throw new Error(
-            `Upload timed out after ${UPLOAD_TIMEOUT_MS / 1000} seconds. The file may be too large or the server is under heavy load.`
+            `Processing timed out after ${UPLOAD_TIMEOUT_MS / 1000} seconds. The file may be too large or the server is under heavy load.`
           );
         }
         throw new Error("Network error — could not reach the server.");
@@ -104,11 +149,14 @@ export default function ExcelUploader() {
         clearTimeout(timeout);
       }
 
-      const json = await res.json();
-
-      if (!res.ok) {
+      let json: any;
+      try {
+        json = await parseApiResponse(res);
+      } catch (parseErr) {
         setStatus("error");
-        setMessage(json.error || "Upload failed.");
+        setMessage(
+          parseErr instanceof Error ? parseErr.message : "Upload failed."
+        );
         return;
       }
 

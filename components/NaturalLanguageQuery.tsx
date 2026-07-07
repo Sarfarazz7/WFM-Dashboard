@@ -2,6 +2,21 @@
 
 import { useState, useRef, useEffect } from "react";
 
+async function parseApiResponse(res: Response) {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const text = await res.text();
+    throw new Error(
+      `Server returned a non-JSON response (status ${res.status}): ${text.slice(0, 200)}`
+    );
+  }
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.error ?? `Request failed with status ${res.status}`);
+  }
+  return json;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -40,11 +55,7 @@ export default function NaturalLanguageQuery({ dateFrom, dateTo, lob }: Props) {
         body: JSON.stringify({ question, dateFrom, dateTo, lob }),
       });
 
-      const json = await res.json();
-
-      if (!res.ok) {
-        throw new Error(json.error || "Failed to get answer");
-      }
+      const json = await parseApiResponse(res);
 
       setMessages((prev) => [
         ...prev,

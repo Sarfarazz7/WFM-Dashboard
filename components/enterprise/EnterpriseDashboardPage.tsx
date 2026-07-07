@@ -6,6 +6,21 @@ import AiInsightsPanel from "@/components/AiInsightsPanel";
 import NaturalLanguageQuery from "@/components/NaturalLanguageQuery";
 import ExcelUploader from "@/components/ExcelUploader";
 
+async function parseApiResponse(res: Response) {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const text = await res.text();
+    throw new Error(
+      `Server returned a non-JSON response (status ${res.status}): ${text.slice(0, 200)}`
+    );
+  }
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.error ?? `Request failed with status ${res.status}`);
+  }
+  return json;
+}
+
 type PageKind =
   | "executive"
   | "agents"
@@ -42,7 +57,7 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
     async function loadDefaultDates() {
       try {
         const res = await fetch("/api/dates");
-        const json = await res.json();
+        const json = await parseApiResponse(res);
         const dates: string[] = json.dates ?? [];
         if (dates.length > 0) {
           const dateTo = dates[0];
@@ -89,8 +104,7 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
         const responses = await Promise.all(
           endpoints.map(async ([key, path]) => {
             const res = await fetch(`${path}?${params}`, { signal: controller.signal });
-            const json = await res.json();
-            if (!res.ok || json.error) throw new Error(json.error || `Failed to load ${path}`);
+            const json = await parseApiResponse(res);
             return [key, json] as const;
           })
         );

@@ -9,14 +9,19 @@ import {
 export const runtime = "nodejs"; // xlsx parsing needs Node, not Edge
 export const maxDuration = 120;
 
+const STORAGE_BUCKET = "excel-files";
+
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    const reportDate = formData.get("reportDate") as string | null;
+    const body = await request.json();
+    const { storagePath, fileName, reportDate, fileSizeBytes } = body;
 
-    if (!file) {
-      return NextResponse.json({ error: "No file selected" }, { status: 400 });
+    if (!storagePath || typeof storagePath !== "string") {
+      return NextResponse.json({ error: "storagePath is required" }, { status: 400 });
+    }
+
+    if (!fileName || typeof fileName !== "string") {
+      return NextResponse.json({ error: "fileName is required" }, { status: 400 });
     }
 
     if (!reportDate || !/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) {
@@ -27,17 +32,37 @@ export async function POST(request: NextRequest) {
     }
 
     const validExtensions = [".xlsx", ".xls"];
-    if (!validExtensions.some((ext) => file.name.toLowerCase().endsWith(ext))) {
+    if (!validExtensions.some((ext) => fileName.toLowerCase().endsWith(ext))) {
       return NextResponse.json(
         { error: "Please upload a .xlsx or .xls file" },
         { status: 400 }
       );
     }
 
-    const arrayBuffer = await file.arrayBuffer();
+    const { data: fileData, error: downloadError } = await supabaseServer.storage
+      .from(STORAGE_BUCKET)
+      .download(storagePath);
+
+    if (downloadError || !fileData) {
+      return NextResponse.json(
+        { error: `Failed to download file from storage: ${downloadError?.message ?? "Unknown error"}` },
+        { status: 500 }
+      );
+    }
+
+    const arrayBuffer = await fileData.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    const result = await runWorkbookUploadPipeline({ file, buffer, reportDate });
+    const file = new File([buffer], fileName, {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const result = await runWorkbookUploadPipeline({
+      file,
+      buffer,
+      reportDate,
+      storagePath,
+    });
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

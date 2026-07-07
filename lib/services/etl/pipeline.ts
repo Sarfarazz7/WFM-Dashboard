@@ -30,6 +30,7 @@ export async function runWorkbookUploadPipeline(params: {
   file: File;
   buffer: Buffer;
   reportDate: string;
+  storagePath?: string;
 }): Promise<UploadResult> {
   const validationError = validateWorkbookFile(params.file);
   if (validationError) throw new Error(validationError);
@@ -51,7 +52,7 @@ export async function runWorkbookUploadPipeline(params: {
   }
 
   const upload = created.data;
-  const storagePath = createStoragePath(upload.id, params.file.name);
+  const storagePath = params.storagePath ?? createStoragePath(upload.id, params.file.name);
 
   try {
     await writeStageLog({
@@ -67,6 +68,17 @@ export async function runWorkbookUploadPipeline(params: {
     });
 
     await runStage(upload.id, "store", "Store workbook file", async () => {
+      if (params.storagePath) {
+        return {
+          details: {
+            storagePath: params.storagePath,
+            contentType: params.file.type || "application/octet-stream",
+            fileSizeBytes: params.file.size,
+            alreadyUploaded: true,
+          },
+        };
+      }
+
       const { error: storageError } = await supabaseServer.storage
         .from("excel-files")
         .upload(storagePath, params.buffer, {
