@@ -235,6 +235,17 @@ export async function deleteExcelRows(uploadId: string): Promise<number> {
   return count ?? 0;
 }
 
+export async function deleteOrphanedExcelRowsForDate(date: string): Promise<number> {
+  const { count, error } = await supabaseServer
+    .from("excel_rows")
+    .delete({ count: "exact" })
+    .eq("date", date)
+    .is("upload_id", null);
+
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
 export async function deleteUploadRecord(uploadId: string) {
   const { error } = await supabaseServer
     .from("uploads")
@@ -245,10 +256,13 @@ export async function deleteUploadRecord(uploadId: string) {
 }
 
 export async function recomputeSummariesForDate(date: string) {
+  // Only include rows with a valid upload_id — orphaned rows (upload_id=null)
+  // are stale leftovers from previous deletes and must not contaminate summaries.
   const { data: remainingRows, error: fetchError } = await supabaseServer
     .from("excel_rows")
     .select("sheet_name, row_index, date, lob, agent_name, metric_type, data")
-    .eq("date", date);
+    .eq("date", date)
+    .not("upload_id", "is", null);
 
   if (fetchError) throw new Error(fetchError.message);
 
@@ -262,6 +276,11 @@ export async function recomputeSummariesForDate(date: string) {
 
   const dailySummaries = computeDailySummaries(parsedRows);
   const agentSummaries = computeAgentDaySummaries(parsedRows);
+
+  // Delete first, then upsert — this ensures stale agent rows from deleted
+  // uploads are removed, not just left behind by the upsert's onConflict logic.
+  await supabaseServer.from("daily_summary").delete().eq("date", date);
+  await supabaseServer.from("agent_day_summary").delete().eq("date", date);
 
   const [dailyResult, agentResult] = await Promise.all([
     dailySummaries.length > 0

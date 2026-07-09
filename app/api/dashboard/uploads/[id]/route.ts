@@ -7,6 +7,7 @@ import {
   deleteExcelRows,
   deleteUploadRecord,
   recomputeSummariesForDate,
+  deleteOrphanedExcelRowsForDate,
 } from "@/lib/repositories/uploadsRepository";
 
 export async function DELETE(
@@ -64,9 +65,11 @@ export async function DELETE(
     }
 
     // 5. Recompute daily_summary / agent_day_summary for each affected date
+    //    Also clean up orphaned rows (upload_id=null) left from previous deletes
     const recomputeResults: { date: string; status: string }[] = [];
     for (const date of affectedDates) {
       try {
+        await deleteOrphanedExcelRowsForDate(date);
         await recomputeSummariesForDate(date);
         recomputeResults.push({ date, status: "recomputed" });
       } catch (err) {
