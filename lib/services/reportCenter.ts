@@ -84,13 +84,9 @@ export async function recordReportExport(params: {
     completed_at: new Date().toISOString(),
   };
 
-  const organizationId = await findDefaultOrganizationId();
-  if (organizationId) payload.organization_id = organizationId;
-
   const { error } = await supabaseServer.from("report_exports").insert(payload);
-  if (error && payload.organization_id) {
-    const { organization_id: _ignored, ...fallbackPayload } = payload;
-    await supabaseServer.from("report_exports").insert(fallbackPayload);
+  if (error) {
+    console.error("[reportCenter] Failed to record report export:", error.message);
   }
 }
 
@@ -132,9 +128,6 @@ export async function createReportSchedule(params: {
     filters: params.filters,
     status: "active",
   };
-
-  const organizationId = await findDefaultOrganizationId();
-  if (organizationId) payload.organization_id = organizationId;
 
   const { data, error } = await supabaseServer
     .from("report_schedules")
@@ -293,13 +286,4 @@ function weekKey(value: string) {
   return `${date.getFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-async function findDefaultOrganizationId(): Promise<string | null> {
-  const { data, error } = await supabaseServer
-    .from("organizations")
-    .select("id")
-    .eq("slug", "default")
-    .maybeSingle<{ id: string }>();
 
-  if (error) return null;
-  return data?.id ?? null;
-}

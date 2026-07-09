@@ -42,6 +42,7 @@ const TIME_KEYS_BY_METRIC = {
   interval: "Interval Start",
   session: "Login Time",
   ticket: "Date/Time Opened",
+  workbench: "dateOpened",
 };
 
 function parseDatetime(value) {

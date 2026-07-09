@@ -94,17 +94,12 @@ export async function createUploadRecord(params: {
   fileSizeBytes: number;
   reportDate?: string;
 }) {
-  const organizationId = await findDefaultOrganizationId();
   const payload: Record<string, unknown> = {
     file_name: params.fileName,
     file_hash: params.fileHash,
     file_size_bytes: params.fileSizeBytes,
     status: "processing",
   };
-
-  if (organizationId) {
-    payload.organization_id = organizationId;
-  }
 
   if (params.reportDate) {
     payload.report_date = params.reportDate;
@@ -300,13 +295,4 @@ export async function recomputeSummariesForDate(date: string) {
   if (agentResult.error) throw new Error(`Agent summary recompute failed: ${agentResult.error.message}`);
 }
 
-async function findDefaultOrganizationId(): Promise<string | null> {
-  const { data, error } = await supabaseServer
-    .from("organizations")
-    .select("id")
-    .eq("slug", "default")
-    .maybeSingle<{ id: string }>();
 
-  if (error) return null;
-  return data?.id ?? null;
-}
