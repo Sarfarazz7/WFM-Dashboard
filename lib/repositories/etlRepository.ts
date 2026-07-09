@@ -168,6 +168,7 @@ export async function insertCompatibilityRows(params: {
     agent_name: row.agent_name,
     metric_type: row.metric_type,
     data: row.data,
+    occurred_at: (row as any).occurred_at ?? null,
   }));
 
   await insertBatches("excel_rows", insertRows, "excel rows");

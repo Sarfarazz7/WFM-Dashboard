@@ -4,6 +4,8 @@ import type { MetricType } from "@/lib/types";
 export interface CalculationFilters {
   dateFrom?: string;
   dateTo?: string;
+  timeFrom?: string;
+  timeTo?: string;
   lob?: string;
   agentName?: string;
 }
@@ -191,6 +193,8 @@ async function fetchMetricRows(
 
   if (filters.dateFrom) query = query.gte("date", filters.dateFrom);
   if (filters.dateTo ?? filters.dateFrom) query = query.lte("date", filters.dateTo ?? filters.dateFrom!);
+  if (filters.timeFrom) query = query.filter("occurred_at::time", "gte", filters.timeFrom);
+  if (filters.timeTo) query = query.filter("occurred_at::time", "lte", filters.timeTo);
   if (filters.lob) query = query.eq("lob", filters.lob);
   if (filters.agentName) query = query.eq("agent_name", filters.agentName);
 

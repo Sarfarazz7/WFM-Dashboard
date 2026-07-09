@@ -119,6 +119,29 @@ export function convertExcelDate(value: unknown): string | null {
   return null;
 }
 
+export function convertExcelDatetime(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (!parsed) return null;
+    const dateStr = `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+    const timeStr = `${String(parsed.H ?? 0).padStart(2, "0")}:${String(parsed.M ?? 0).padStart(2, "0")}:${String(parsed.S ?? 0).padStart(2, "0")}`;
+    return `${dateStr}T${timeStr}.000Z`;
+  }
+
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  }
+
+  return null;
+}
+
 export function findValue(row: RawObjectRow, header: string): unknown {
   const wanted = normalizeHeader(header);
   const key = Object.keys(row).find((candidate) => normalizeHeader(candidate) === wanted);

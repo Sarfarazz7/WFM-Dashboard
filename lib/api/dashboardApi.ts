@@ -7,6 +7,8 @@ import { round as utilRound } from "@/lib/utils";
 export interface DashboardQuery {
   dateFrom?: string;
   dateTo?: string;
+  timeFrom?: string;
+  timeTo?: string;
   lob?: string;
   agent?: string;
   search?: string;
@@ -45,6 +47,8 @@ export function parseDashboardQuery(request: NextRequest): DashboardQuery {
   return {
     dateFrom: clean(params.get("dateFrom")),
     dateTo: clean(params.get("dateTo")) ?? clean(params.get("dateFrom")),
+    timeFrom: clean(params.get("timeFrom")),
+    timeTo: clean(params.get("timeTo")),
     lob: clean(params.get("lob")),
     agent: clean(params.get("agent")) ?? clean(params.get("agentName")),
     search: clean(params.get("search")),
@@ -92,6 +96,8 @@ export function toCalculationFilters(query: DashboardQuery): DashboardFilters {
   return {
     dateFrom: query.dateFrom,
     dateTo: query.dateTo,
+    timeFrom: query.timeFrom,
+    timeTo: query.timeTo,
     lob: query.lob,
     agentName: query.agent,
   };
@@ -187,6 +193,8 @@ export function applyCommonFilters(dbQuery: any, query: DashboardQuery) {
   let next = dbQuery;
   if (query.dateFrom) next = next.gte("date", query.dateFrom);
   if (query.dateTo) next = next.lte("date", query.dateTo);
+  if (query.timeFrom) next = next.filter("occurred_at::time", "gte", query.timeFrom);
+  if (query.timeTo) next = next.filter("occurred_at::time", "lte", query.timeTo);
   if (query.lob) next = next.eq("lob", query.lob);
   if (query.agent) next = next.eq("agent_name", query.agent);
   return next;

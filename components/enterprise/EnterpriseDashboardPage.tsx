@@ -40,18 +40,19 @@ interface Props {
 interface Filters {
   dateFrom: string;
   dateTo: string;
+  timeFrom: string;
+  timeTo: string;
   lob: string;
   agent: string;
 }
 
 function getFallbackDates() {
   const today = new Date().toISOString().slice(0, 10);
-  const startDate = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  return { dateFrom: startDate, dateTo: today };
+  return { dateFrom: today, dateTo: today };
 }
 
 export default function EnterpriseDashboardPage({ kind, title, description }: Props) {
-  const [filters, setFilters] = useState<Filters>({ dateFrom: "", dateTo: "", lob: "", agent: "" });
+  const [filters, setFilters] = useState<Filters>({ dateFrom: "", dateTo: "", timeFrom: "", timeTo: "", lob: "", agent: "" });
 
   useEffect(() => {
     async function loadDefaultDates() {
@@ -61,7 +62,7 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
         const dates: string[] = json.dates ?? [];
         if (dates.length > 0) {
           const dateTo = dates[0];
-          const dateFrom = dates[Math.min(6, dates.length - 1)];
+          const dateFrom = dates[0];
           setFilters((prev) => {
             if (prev.dateFrom === "" && prev.dateTo === "") {
               return { ...prev, dateFrom, dateTo };
@@ -310,9 +311,11 @@ function PageHeading({ title, description }: { title: string; description: strin
 
 function FilterBar({ filters, setFilters }: { filters: Filters; setFilters: (filters: Filters) => void }) {
   return (
-    <div className="grid gap-3 border border-ink-600/60 bg-ink-900 p-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-3 border border-ink-600/60 bg-ink-900 p-4 sm:grid-cols-2 lg:grid-cols-6">
       <Field label="From" type="date" value={filters.dateFrom} onChange={(dateFrom) => setFilters({ ...filters, dateFrom })} />
       <Field label="To" type="date" value={filters.dateTo} onChange={(dateTo) => setFilters({ ...filters, dateTo })} />
+      <Field label="Time From" type="time" value={filters.timeFrom} onChange={(timeFrom) => setFilters({ ...filters, timeFrom })} />
+      <Field label="Time To" type="time" value={filters.timeTo} onChange={(timeTo) => setFilters({ ...filters, timeTo })} />
       <Field label="LOB" value={filters.lob} placeholder="All teams" onChange={(lob) => setFilters({ ...filters, lob })} />
       <Field label="Agent" value={filters.agent} placeholder="All agents" onChange={(agent) => setFilters({ ...filters, agent })} />
     </div>
@@ -450,6 +453,8 @@ function buildParams(filters: Filters) {
     page: "1",
     pageSize: "50",
   });
+  if (filters.timeFrom) params.set("timeFrom", filters.timeFrom);
+  if (filters.timeTo) params.set("timeTo", filters.timeTo);
   if (filters.lob) params.set("lob", filters.lob);
   if (filters.agent) params.set("agent", filters.agent);
   return params.toString();

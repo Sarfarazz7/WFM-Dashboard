@@ -24,6 +24,7 @@ export interface StandardizedExcelRow {
   agent_name: string | null;
   metric_type: MetricType;
   data: Record<string, unknown>;
+  occurred_at?: string | null;
 }
 
 export interface ValidationIssue {

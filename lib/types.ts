@@ -89,6 +89,8 @@ export type DatePreset = (typeof DATE_PRESETS)[number];
 export interface DashboardFilters {
   dateFrom?: string;
   dateTo?: string;
+  timeFrom?: string;
+  timeTo?: string;
   lob?: string;
   agentName?: string;
 }
