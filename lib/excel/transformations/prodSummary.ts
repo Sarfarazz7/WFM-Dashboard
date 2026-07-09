@@ -1,5 +1,5 @@
 import type { RawObjectRow, StandardizedExcelRow } from "../types";
-import { findValue, parseDuration } from "../utils";
+import { findValue, parseDuration, parseNumber } from "../utils";
 import { prodSummaryMapping } from "../mappings";
 
 export function transformProdSummaryData(row: RawObjectRow): Record<string, unknown> {
@@ -7,7 +7,7 @@ export function transformProdSummaryData(row: RawObjectRow): Record<string, unkn
     ...row,
     _break_seconds: parseDuration(findValue(row, prodSummaryMapping.columns.breakDuration)),
     _ready_seconds: parseDuration(findValue(row, prodSummaryMapping.columns.readyDuration)),
-    _aht_seconds: parseDuration(findValue(row, prodSummaryMapping.columns.averageHandleTime)),
+    _aht_seconds: parseNumber(findValue(row, prodSummaryMapping.columns.averageHandleTime)),
   };
 }
 
