@@ -1,4 +1,29 @@
 import type { ParsedRow } from "./parser";
+import type { MetricType } from "./types";
+
+/**
+ * Convert an excel_rows DB row back into a ParsedRow for re-aggregation.
+ * The data column is stored as JSONB with the same shape as ParsedRow.data.
+ */
+export function excelRowToParsedRow(row: {
+  sheet_name: string;
+  row_index: number;
+  date: string | null;
+  lob: string | null;
+  agent_name: string | null;
+  metric_type: string;
+  data: Record<string, unknown>;
+}): ParsedRow {
+  return {
+    sheet_name: row.sheet_name,
+    row_index: row.row_index,
+    date: row.date,
+    lob: row.lob,
+    agent_name: row.agent_name,
+    metric_type: row.metric_type as MetricType,
+    data: row.data,
+  };
+}
 
 function avg(nums: (number | null | undefined)[]): number {
   const valid = nums.filter((n): n is number => n !== null && n !== undefined);

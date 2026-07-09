@@ -1,5 +1,10 @@
 import { supabaseServer } from "@/lib/supabaseClient";
 import type { UploadHistoryItem, UploadStatus } from "@/lib/types";
+import {
+  computeDailySummaries,
+  computeAgentDaySummaries,
+  excelRowToParsedRow,
+} from "@/lib/aggregates";
 
 export type UploadStage =
   | "receive"
@@ -195,6 +200,80 @@ export async function listRecentUploads() {
   }));
 
   return { data: uploads, error: null };
+}
+
+export async function getUploadForDelete(uploadId: string) {
+  const { data, error } = await supabaseServer
+    .from("uploads")
+    .select("id, status, storage_path, file_name")
+    .eq("id", uploadId)
+    .maybeSingle<{ id: string; status: string; storage_path: string | null; file_name: string }>();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function getAffectedDates(uploadId: string): Promise<string[]> {
+  const { data, error } = await supabaseServer
+    .from("excel_rows")
+    .select("date")
+    .eq("upload_id", uploadId)
+    .not("date", "is", null);
+
+  if (error) throw new Error(error.message);
+  const dates = [...new Set((data ?? []).map((r: any) => r.date as string))];
+  return dates;
+}
+
+export async function deleteExcelRows(uploadId: string): Promise<number> {
+  const { count, error } = await supabaseServer
+    .from("excel_rows")
+    .delete({ count: "exact" })
+    .eq("upload_id", uploadId);
+
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+export async function deleteUploadRecord(uploadId: string) {
+  const { error } = await supabaseServer
+    .from("uploads")
+    .delete()
+    .eq("id", uploadId);
+
+  if (error) throw new Error(error.message);
+}
+
+export async function recomputeSummariesForDate(date: string) {
+  const { data: remainingRows, error: fetchError } = await supabaseServer
+    .from("excel_rows")
+    .select("sheet_name, row_index, date, lob, agent_name, metric_type, data")
+    .eq("date", date);
+
+  if (fetchError) throw new Error(fetchError.message);
+
+  if (!remainingRows || remainingRows.length === 0) {
+    await supabaseServer.from("daily_summary").delete().eq("date", date);
+    await supabaseServer.from("agent_day_summary").delete().eq("date", date);
+    return { dailyDeleted: true, agentDeleted: true };
+  }
+
+  const parsedRows = remainingRows.map(excelRowToParsedRow);
+
+  const dailySummaries = computeDailySummaries(parsedRows);
+  const agentSummaries = computeAgentDaySummaries(parsedRows);
+
+  const [dailyResult, agentResult] = await Promise.all([
+    dailySummaries.length > 0
+      ? supabaseServer.from("daily_summary").upsert(dailySummaries, { onConflict: "date" })
+      : Promise.resolve({ error: null }),
+    agentSummaries.length > 0
+      ? supabaseServer.from("agent_day_summary").upsert(agentSummaries, { onConflict: "date,agent_name" })
+      : Promise.resolve({ error: null }),
+  ]);
+
+  if (dailyResult.error) throw new Error(`Daily summary recompute failed: ${dailyResult.error.message}`);
+  if (agentResult.error) throw new Error(`Agent summary recompute failed: ${agentResult.error.message}`);
 }
 
 async function findDefaultOrganizationId(): Promise<string | null> {

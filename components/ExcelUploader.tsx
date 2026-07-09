@@ -31,6 +31,8 @@ export default function ExcelUploader() {
   const [recentFiles, setRecentFiles] = useState<UploadHistoryItem[]>([]);
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<string>("");
 
   const loadRecentFiles = useCallback(async () => {
     try {
@@ -176,6 +178,34 @@ export default function ExcelUploader() {
     return `${m}m ${s}s`;
   }
 
+  async function handleDelete(uploadId: string, fileName: string) {
+    const confirmed = window.confirm(
+      `Delete "${fileName}"?\n\nThis will permanently remove the file and all its data from the dashboard. This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(uploadId);
+    setDeleteMessage("");
+
+    try {
+      const res = await fetch(`/api/dashboard/uploads/${uploadId}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json.error ?? `Delete failed with status ${res.status}`);
+      }
+
+      setRecentFiles((prev) => prev.filter((f) => f.id !== uploadId));
+      setDeleteMessage(`Deleted "${fileName}". Dashboard data has been recomputed.`);
+    } catch (err) {
+      setDeleteMessage(err instanceof Error ? err.message : "Delete failed.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="card">
@@ -270,21 +300,49 @@ export default function ExcelUploader() {
                 <th className="pb-2 font-normal">Uploaded</th>
                 <th className="pb-2 font-normal">Status</th>
                 <th className="pb-2 font-normal text-right">Rows</th>
+                <th className="pb-2 font-normal text-right">Action</th>
               </tr>
             </thead>
             <tbody>
               {recentFiles.map((f, i) => (
-                <tr key={i} className="border-b border-ink-700/60 last:border-0">
+                <tr key={f.id ?? i} className="border-b border-ink-700/60 last:border-0">
                   <td className="py-2 text-mist-200">{f.file_name}</td>
                   <td className="py-2 text-mist-400">
                     {new Date(f.uploaded_at).toLocaleString()}
                   </td>
                   <td className="py-2 text-mist-400">{f.status ?? "completed"}</td>
                   <td className="py-2 text-right text-mist-200">{f.rowCount}</td>
+                  <td className="py-2 text-right">
+                    {f.id && (
+                      <button
+                        onClick={() => handleDelete(f.id!, f.file_name)}
+                        disabled={deletingId === f.id || f.status === "processing"}
+                        title={
+                          f.status === "processing"
+                            ? "Cannot delete while processing"
+                            : "Delete this upload and its data"
+                        }
+                        className="text-xs text-mist-400 hover:text-metric-abandon disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {deletingId === f.id ? "Deleting…" : "Delete"}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        )}
+        {deleteMessage && (
+          <p
+            className={`text-sm mt-3 rounded-lg px-3 py-2 border ${
+              deleteMessage.startsWith("Deleted")
+                ? "text-metric-csat bg-metric-csat/10 border-metric-csat/30"
+                : "text-metric-abandon bg-metric-abandon/10 border-metric-abandon/30"
+            }`}
+          >
+            {deleteMessage}
+          </p>
         )}
       </div>
     </div>
