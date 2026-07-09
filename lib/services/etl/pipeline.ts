@@ -46,6 +46,7 @@ export async function runWorkbookUploadPipeline(params: {
     fileName: params.file.name,
     fileHash,
     fileSizeBytes: params.file.size,
+    reportDate: params.reportDate,
   });
   if (created.error || !created.data) {
     throw new Error(`Failed to create upload record: ${created.error?.message ?? "Unknown error"}`);

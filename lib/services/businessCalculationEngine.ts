@@ -121,6 +121,15 @@ export async function calculateCallsPerHour(filters: CalculationFilters = {}): P
   };
 }
 
+export interface AgentHourlyCell {
+  agent: string;
+  hour: number;
+  avgAht: number;
+  totalAht: number;
+  callCount: number;
+  answeredCount: number;
+}
+
 export interface AllSummaryResult {
   aht: CalculationResult;
   shrinkage: CalculationResult;
@@ -180,6 +189,73 @@ export async function calculateAgentRanking(filters: CalculationFilters = {}): P
 export async function calculateTeamRanking(filters: CalculationFilters = {}): Promise<RankingResult[]> {
   const rows = await fetchMetricRows(filters, ALL_METRICS);
   return calculateRanking(rows, "team");
+}
+
+export async function calculateAgentHourlyAHT(filters: CalculationFilters = {}): Promise<AgentHourlyCell[]> {
+  const PAGE_SIZE = 1000;
+  const grouped = new Map<string, { totalAht: number; totalWeight: number; callCount: number; answeredCount: number }>();
+
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    let query = supabaseServer
+      .from("excel_rows")
+      .select("agent_name, data, occurred_at")
+      .eq("metric_type", "call")
+      .not("occurred_at", "is", null)
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (filters.dateFrom) query = query.gte("date", filters.dateFrom);
+    if (filters.dateTo ?? filters.dateFrom) query = query.lte("date", filters.dateTo ?? filters.dateFrom!);
+    if (filters.timeFrom) query = query.filter("occurred_at::time", "gte", filters.timeFrom);
+    if (filters.timeTo) query = query.filter("occurred_at::time", "lte", filters.timeTo);
+    if (filters.lob) query = query.eq("lob", filters.lob);
+    if (filters.agentName) query = query.eq("agent_name", filters.agentName);
+
+    const { data, error } = await query;
+    if (error) throw new Error(`Agent hourly query failed: ${error.message}`);
+
+    for (const row of (data ?? []) as Array<{ agent_name: string | null; data: Record<string, unknown>; occurred_at: string }>) {
+      const agent = row.agent_name ?? "Unknown";
+      const hour = new Date(row.occurred_at).getUTCHours();
+      const aht = numberFrom(row.data._aht);
+      const answered = numberFrom(row.data._answered);
+      const key = `${agent}|${hour}`;
+
+      if (!grouped.has(key)) {
+        grouped.set(key, { totalAht: 0, totalWeight: 0, callCount: 0, answeredCount: 0 });
+      }
+      const bucket = grouped.get(key)!;
+      bucket.callCount++;
+      bucket.answeredCount += answered;
+      if (aht > 0 && answered > 0) {
+        bucket.totalAht += aht * answered;
+        bucket.totalWeight += answered;
+      } else if (aht > 0) {
+        bucket.totalAht += aht;
+        bucket.totalWeight += 1;
+      }
+    }
+
+    hasMore = (data?.length ?? 0) === PAGE_SIZE;
+    offset += PAGE_SIZE;
+  }
+
+  const result: AgentHourlyCell[] = [];
+  for (const [key, bucket] of grouped) {
+    const [agent, hourStr] = key.split("|");
+    result.push({
+      agent,
+      hour: Number(hourStr),
+      avgAht: bucket.totalWeight > 0 ? round(bucket.totalAht / bucket.totalWeight) : 0,
+      totalAht: round(bucket.totalAht),
+      callCount: bucket.callCount,
+      answeredCount: bucket.answeredCount,
+    });
+  }
+
+  return result.sort((a, b) => a.agent.localeCompare(b.agent) || a.hour - b.hour);
 }
 
 async function fetchMetricRows(

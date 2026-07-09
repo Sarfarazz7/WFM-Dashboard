@@ -92,6 +92,7 @@ export async function createUploadRecord(params: {
   fileName: string;
   fileHash: string;
   fileSizeBytes: number;
+  reportDate?: string;
 }) {
   const organizationId = await findDefaultOrganizationId();
   const payload: Record<string, unknown> = {
@@ -103,6 +104,10 @@ export async function createUploadRecord(params: {
 
   if (organizationId) {
     payload.organization_id = organizationId;
+  }
+
+  if (params.reportDate) {
+    payload.report_date = params.reportDate;
   }
 
   return supabaseServer

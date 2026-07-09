@@ -129,6 +129,9 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
   const attendance = data.attendance?.rows ?? [];
   const uploads = data.uploads?.rows ?? [];
   const report = data.report ?? null;
+  const hourlyCells = data.hourly?.cells ?? [];
+  const hourlyHours = data.hourly?.hours ?? [];
+  const hourlyAgents = data.hourly?.agents ?? [];
 
   const lobPie = useMemo(() => buildLobPie(agents), [agents]);
   const heatmapRows = useMemo(() => buildHeatmap(agents), [agents]);
@@ -192,6 +195,12 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
               ]}
             />
           </Section>
+          <AgentHourlyPanel
+            cells={hourlyCells}
+            hours={hourlyHours}
+            agents={hourlyAgents}
+            loading={loading}
+          />
           <NaturalLanguageQuery dateFrom={filters.dateFrom} dateTo={filters.dateTo} lob={filters.lob} />
           <AiInsightsPanel />
         </>
@@ -400,6 +409,88 @@ function HeatmapPanel({ rows, loading }: { rows: Array<{ agent: string; values: 
   );
 }
 
+function AgentHourlyPanel({
+  cells,
+  hours,
+  agents,
+  loading,
+}: {
+  cells: Array<{ agent: string; hour: number; avgAht: number; callCount: number }>;
+  hours: number[];
+  agents: string[];
+  loading: boolean;
+}) {
+  const cellMap = new Map<string, { avgAht: number; callCount: number }>();
+  for (const c of cells) cellMap.set(`${c.agent}|${c.hour}`, { avgAht: c.avgAht, callCount: c.callCount });
+
+  return (
+    <Section title="Agent × Hour-of-Day AHT">
+      <p className="text-xs text-mist-400 mb-3">
+        Average Handle Time per agent per hour (UTC). Values color-coded: lower AHT is better.
+      </p>
+      {loading ? (
+        <SkeletonRows />
+      ) : agents.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-xs">
+            <thead>
+              <tr className="border-b border-ink-600 text-left text-mist-400">
+                <th className="pb-2 pr-3 font-normal sticky left-0 bg-ink-800">Agent</th>
+                {hours.map((h) => (
+                  <th key={h} className="pb-2 px-1 font-normal text-center">{h}:00</th>
+                ))}
+                <th className="pb-2 pl-2 font-normal text-right">Avg</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agents.slice(0, 30).map((agent) => {
+                const rowCells = hours.map((h) => cellMap.get(`${agent}|${h}`));
+                const validAhts = rowCells.filter((c): c is { avgAht: number; callCount: number } => c != null && c.avgAht > 0);
+                const rowAvg = validAhts.length > 0
+                  ? Math.round(validAhts.reduce((s, c) => s + c.avgAht, 0) / validAhts.length)
+                  : 0;
+
+                return (
+                  <tr key={agent} className="border-b border-ink-700/70 last:border-0">
+                    <td className="py-1.5 pr-3 text-mist-300 sticky left-0 bg-ink-800 truncate max-w-[160px]" title={agent}>
+                      {agent}
+                    </td>
+                    {hours.map((h) => {
+                      const cell = cellMap.get(`${agent}|${h}`);
+                      if (!cell || cell.avgAht <= 0) {
+                        return <td key={h} className="px-1 py-1.5 text-center text-ink-500">-</td>;
+                      }
+                      const intensity = Math.min(0.75, Math.max(0.08, cell.avgAht / 400));
+                      return (
+                        <td
+                          key={h}
+                          className="px-1 py-1.5 text-center border border-ink-700"
+                          style={{ backgroundColor: `rgba(45, 212, 200, ${intensity})` }}
+                          title={`${cell.avgAht}s (${cell.callCount} calls)`}
+                        >
+                          {cell.avgAht}
+                        </td>
+                      );
+                    })}
+                    <td className="py-1.5 pl-2 text-right text-mist-300 font-mono">
+                      {rowAvg > 0 ? rowAvg : "-"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {agents.length > 30 && (
+            <p className="text-xs text-mist-400 mt-2">Showing 30 of {agents.length} agents.</p>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="border border-ink-600/60 bg-ink-800 p-4">
@@ -466,7 +557,7 @@ function endpointsFor(kind: PageKind): Array<[string, string]> {
     ["trends", "/api/dashboard/trends"],
   ];
   if (kind === "executive") return [...base, ["overview", "/api/dashboard"], ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"]];
-  if (kind === "agents") return [...base, ["agents", "/api/dashboard/agents"]];
+  if (kind === "agents") return [...base, ["agents", "/api/dashboard/agents"], ["hourly", "/api/dashboard/agent-hourly"]];
   if (kind === "attendance") return [...base, ["attendance", "/api/dashboard/attendance"]];
   if (kind === "productivity") return [...base, ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"]];
   if (kind === "shrinkage") return [...base, ["shrinkage", "/api/dashboard/shrinkage"]];
