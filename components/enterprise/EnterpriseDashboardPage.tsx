@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LinePanel, AreaPanel, BarPanel, PiePanel, ChartGrid } from "./ChartPanels";
+import { LinePanel, AreaPanel, BarPanel, PiePanel, ComboPanel, ChartGrid } from "./ChartPanels";
 import AiInsightsPanel from "@/components/AiInsightsPanel";
 import NaturalLanguageQuery from "@/components/NaturalLanguageQuery";
 import ExcelUploader from "@/components/ExcelUploader";
@@ -132,6 +132,7 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
   const hourlyCells = data.hourly?.cells ?? [];
   const hourlyHours = data.hourly?.hours ?? [];
   const hourlyAgents = data.hourly?.agents ?? [];
+  const intervalInbound = data.intervalInbound ?? null;
 
   const lobPie = useMemo(() => buildLobPie(agents), [agents]);
   const heatmapRows = useMemo(() => buildHeatmap(agents), [agents]);
@@ -170,6 +171,7 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
             <BarPanel title="Top teams by score" data={teams} xKey="name" barKey="score" />
             <PiePanel title="Agent distribution by LOB" data={lobPie} />
           </ChartGrid>
+          <IntervalInboundPanel data={intervalInbound} loading={loading} />
           <HeatmapPanel rows={heatmapRows} loading={loading} />
           <NaturalLanguageQuery dateFrom={filters.dateFrom} dateTo={filters.dateTo} lob={filters.lob} />
           <AiInsightsPanel />
@@ -491,6 +493,125 @@ function AgentHourlyPanel({
   );
 }
 
+function IntervalInboundPanel({
+  data,
+  loading,
+}: {
+  data: {
+    rows: Array<{
+      hour: number;
+      received: number;
+      answered: number;
+      abandoned: number;
+      avgAht: number;
+      callCount: number;
+      hubIbCount: number;
+      hubDeCount: number;
+    }>;
+    totals: {
+      received: number;
+      answered: number;
+      abandoned: number;
+      avgAht: number;
+      callCount: number;
+      hubIbCount: number;
+      hubDeCount: number;
+    };
+  } | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <Section title="Interval-wise Inbound Status">
+        <SkeletonRows />
+      </Section>
+    );
+  }
+
+  if (!data || data.rows.length === 0) {
+    return (
+      <Section title="Interval-wise Inbound Status">
+        <EmptyState />
+      </Section>
+    );
+  }
+
+  const { rows, totals } = data;
+  const abandonPct = totals.received > 0 ? Math.round((totals.abandoned / totals.received) * 10000) / 100 : 0;
+  const answerPct = totals.received > 0 ? Math.round((totals.answered / totals.received) * 10000) / 100 : 0;
+
+  const chartData = rows.map((r) => ({
+    ...r,
+    label: `${String(r.hour).padStart(2, "0")}:00\u2013${String((r.hour + 1) % 24).padStart(2, "0")}:00`,
+  }));
+
+  const kpiCards: Array<[string, string | number, string]> = [
+    ["Total Received", totals.received, ""],
+    ["Answered", totals.answered, ""],
+    ["Abandoned", totals.abandoned, ""],
+    ["Abandon %", abandonPct, "%"],
+    ["Answer %", answerPct, "%"],
+    ["AHT (excl. ACW)", totals.avgAht, "s"],
+  ];
+
+  return (
+    <Section title="Interval-wise Inbound Status">
+      <div className="grid grid-cols-2 gap-3 mb-4 lg:grid-cols-6">
+        {kpiCards.map(([label, value, suffix]) => (
+          <div key={label} className="border border-ink-600/60 bg-ink-900 p-3">
+            <p className="label-eyebrow">{label}</p>
+            <p className="mt-1 text-xl font-display font-semibold text-mist-50">
+              {value}{suffix}
+            </p>
+          </div>
+        ))}
+      </div>
+      <div className="h-80">
+        <ComboPanel
+          title=""
+          data={chartData}
+          xKey="label"
+          barKeys={[
+            { key: "received", name: "Received", color: "#2dd4c8" },
+            { key: "abandoned", name: "Abandoned", color: "#f43f5e" },
+          ]}
+          lineKey="avgAht"
+          lineName="AHT (excl. ACW)"
+        />
+      </div>
+      {totals.hubIbCount > 0 || totals.hubDeCount > 0 ? (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[480px] text-xs">
+            <thead>
+              <tr className="border-b border-ink-600 text-left text-mist-400">
+                <th className="pb-2 pr-3 font-normal">Hour</th>
+                <th className="pb-2 px-3 font-normal text-right">Hub IB</th>
+                <th className="pb-2 px-3 font-normal text-right">Hub DE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.hour} className="border-b border-ink-700/70 last:border-0">
+                  <td className="py-1.5 pr-3 text-mist-300">
+                    {String(r.hour).padStart(2, "0")}:00
+                  </td>
+                  <td className="py-1.5 px-3 text-right text-mist-300">{r.hubIbCount}</td>
+                  <td className="py-1.5 px-3 text-right text-mist-300">{r.hubDeCount}</td>
+                </tr>
+              ))}
+              <tr className="font-semibold text-mist-200">
+                <td className="py-1.5 pr-3">Total</td>
+                <td className="py-1.5 px-3 text-right">{totals.hubIbCount}</td>
+                <td className="py-1.5 px-3 text-right">{totals.hubDeCount}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </Section>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="border border-ink-600/60 bg-ink-800 p-4">
@@ -556,7 +677,7 @@ function endpointsFor(kind: PageKind): Array<[string, string]> {
     ["summary", "/api/dashboard/summary"],
     ["trends", "/api/dashboard/trends"],
   ];
-  if (kind === "executive") return [...base, ["overview", "/api/dashboard"], ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"]];
+  if (kind === "executive") return [...base, ["overview", "/api/dashboard"], ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"], ["intervalInbound", "/api/dashboard/interval-inbound"]];
   if (kind === "agents") return [...base, ["agents", "/api/dashboard/agents"], ["hourly", "/api/dashboard/agent-hourly"]];
   if (kind === "attendance") return [...base, ["attendance", "/api/dashboard/attendance"]];
   if (kind === "productivity") return [...base, ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"]];

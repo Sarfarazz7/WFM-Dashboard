@@ -17,5 +17,9 @@ export const acdCallsMapping: SheetMapping = {
     inbAht: "INB AHT",
     hubHold: "Hub Hold",
     inbHold: "INB Hold",
+    inbAhtWithoutAcw: "INB AHT (Without ACW)",
+    hubAhtWithoutAcw: "HUB AHT (Without ACW)",
+    hublineIb: "Hubline_IB",
+    hublineDe: "Hubline DE",
   },
 };

@@ -7,6 +7,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Line,
   LineChart,
   Pie,
@@ -106,6 +107,58 @@ export function PiePanel({ title, data }: { title: string; data: Array<{ name: s
               {data.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} />)}
             </Pie>
           </PieChart>
+        </ResponsiveContainer>
+      )}
+    </ChartBox>
+  );
+}
+
+export function ComboPanel({
+  title,
+  data,
+  barKeys,
+  lineKey,
+  lineName,
+  xKey,
+}: {
+  title: string;
+  data: any[];
+  barKeys: Array<{ key: string; name: string; color: string }>;
+  lineKey: string;
+  lineName: string;
+  xKey: string;
+}) {
+  return (
+    <ChartBox title={title}>
+      {data.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data}>
+            <CartesianGrid stroke="#1c2942" />
+            <XAxis dataKey={xKey} stroke="#6b7a99" fontSize={11} interval={0} angle={-20} height={70} />
+            <YAxis yAxisId="left" stroke="#6b7a99" fontSize={11} />
+            <YAxis yAxisId="right" orientation="right" stroke="#6b7a99" fontSize={11} />
+            <Tooltip contentStyle={tooltipStyle} />
+            {barKeys.map((bk) => (
+              <Bar
+                key={bk.key}
+                yAxisId="left"
+                dataKey={bk.key}
+                name={bk.name}
+                fill={bk.color}
+                fillOpacity={0.8}
+              />
+            ))}
+            <Line
+              yAxisId="right"
+              dataKey={lineKey}
+              name={lineName}
+              stroke="#3b82f6"
+              strokeWidth={2}
+              dot={false}
+            />
+          </ComposedChart>
         </ResponsiveContainer>
       )}
     </ChartBox>
