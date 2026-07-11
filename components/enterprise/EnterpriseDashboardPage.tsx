@@ -133,6 +133,8 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
   const hourlyHours = data.hourly?.hours ?? [];
   const hourlyAgents = data.hourly?.agents ?? [];
   const intervalInbound = data.intervalInbound ?? null;
+  const hubSubqueueIB = data.hubSubqueueIB ?? null;
+  const hubSubqueueDE = data.hubSubqueueDE ?? null;
 
   const lobPie = useMemo(() => buildLobPie(agents), [agents]);
   const heatmapRows = useMemo(() => buildHeatmap(agents), [agents]);
@@ -171,7 +173,12 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
             <BarPanel title="Top teams by score" data={teams} xKey="name" barKey="score" />
             <PiePanel title="Agent distribution by LOB" data={lobPie} />
           </ChartGrid>
-          <IntervalInboundPanel data={intervalInbound} loading={loading} />
+          <IntervalStatusTabs
+            inboundData={intervalInbound}
+            hubIbData={hubSubqueueIB}
+            hubDeData={hubSubqueueDE}
+            loading={loading}
+          />
           <HeatmapPanel rows={heatmapRows} loading={loading} />
           <NaturalLanguageQuery dateFrom={filters.dateFrom} dateTo={filters.dateTo} lob={filters.lob} />
           <AiInsightsPanel />
@@ -493,36 +500,44 @@ function AgentHourlyPanel({
   );
 }
 
+type IntervalInboundData = {
+  rows: Array<{
+    hour: number;
+    received: number;
+    answered: number;
+    abandoned: number;
+    avgAht: number;
+    callCount: number;
+    hubIbCount: number;
+    hubDeCount: number;
+  }>;
+  totals: {
+    received: number;
+    answered: number;
+    abandoned: number;
+    avgAht: number;
+    callCount: number;
+    hubIbCount: number;
+    hubDeCount: number;
+  };
+};
+
 function IntervalInboundPanel({
+  title,
   data,
   loading,
+  showHubTable = true,
 }: {
-  data: {
-    rows: Array<{
-      hour: number;
-      received: number;
-      answered: number;
-      abandoned: number;
-      avgAht: number;
-      callCount: number;
-      hubIbCount: number;
-      hubDeCount: number;
-    }>;
-    totals: {
-      received: number;
-      answered: number;
-      abandoned: number;
-      avgAht: number;
-      callCount: number;
-      hubIbCount: number;
-      hubDeCount: number;
-    };
-  } | null;
+  title?: string;
+  data: IntervalInboundData | null;
   loading: boolean;
+  showHubTable?: boolean;
 }) {
+  const sectionTitle = title ?? "Interval-wise Inbound Status";
+
   if (loading) {
     return (
-      <Section title="Interval-wise Inbound Status">
+      <Section title={sectionTitle}>
         <SkeletonRows />
       </Section>
     );
@@ -530,7 +545,7 @@ function IntervalInboundPanel({
 
   if (!data || data.rows.length === 0) {
     return (
-      <Section title="Interval-wise Inbound Status">
+      <Section title={sectionTitle}>
         <EmptyState />
       </Section>
     );
@@ -555,7 +570,7 @@ function IntervalInboundPanel({
   ];
 
   return (
-    <Section title="Interval-wise Inbound Status">
+    <Section title={sectionTitle}>
       <div className="grid grid-cols-2 gap-3 mb-4 lg:grid-cols-6">
         {kpiCards.map(([label, value, suffix]) => (
           <div key={label} className="border border-ink-600/60 bg-ink-900 p-3">
@@ -579,7 +594,7 @@ function IntervalInboundPanel({
           lineName="AHT (excl. ACW)"
         />
       </div>
-      {totals.hubIbCount > 0 || totals.hubDeCount > 0 ? (
+      {showHubTable && (totals.hubIbCount > 0 || totals.hubDeCount > 0) ? (
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[480px] text-xs">
             <thead>
@@ -609,6 +624,63 @@ function IntervalInboundPanel({
         </div>
       ) : null}
     </Section>
+  );
+}
+
+type TabKey = "inbound" | "hubIb" | "hubDe";
+
+function IntervalStatusTabs({
+  inboundData,
+  hubIbData,
+  hubDeData,
+  loading,
+}: {
+  inboundData: IntervalInboundData | null;
+  hubIbData: IntervalInboundData | null;
+  hubDeData: IntervalInboundData | null;
+  loading: boolean;
+}) {
+  const [activeTab, setActiveTab] = useState<TabKey>("inbound");
+
+  const tabs: Array<{ key: TabKey; label: string }> = [
+    { key: "inbound", label: "Inbound" },
+    { key: "hubIb", label: "Hubline IB" },
+    { key: "hubDe", label: "Hubline DE" },
+  ];
+
+  const panelData =
+    activeTab === "inbound" ? inboundData : activeTab === "hubIb" ? hubIbData : hubDeData;
+  const panelTitle =
+    activeTab === "inbound"
+      ? "Interval-wise Inbound Status"
+      : activeTab === "hubIb"
+        ? "Hubline IB \u2014 Interval Status"
+        : "Hubline DE \u2014 Interval Status";
+
+  return (
+    <section className="border border-ink-600/60 bg-ink-800 p-4">
+      <div className="mb-4 flex gap-1 border-b border-ink-600">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === tab.key
+                ? "border-b-2 border-[#2dd4c8] text-[#2dd4c8]"
+                : "text-mist-400 hover:text-mist-200"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <IntervalInboundPanel
+        title={panelTitle}
+        data={panelData}
+        loading={loading}
+        showHubTable={activeTab === "inbound"}
+      />
+    </section>
   );
 }
 
@@ -677,7 +749,7 @@ function endpointsFor(kind: PageKind): Array<[string, string]> {
     ["summary", "/api/dashboard/summary"],
     ["trends", "/api/dashboard/trends"],
   ];
-  if (kind === "executive") return [...base, ["overview", "/api/dashboard"], ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"], ["intervalInbound", "/api/dashboard/interval-inbound"]];
+  if (kind === "executive") return [...base, ["overview", "/api/dashboard"], ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"], ["intervalInbound", "/api/dashboard/interval-inbound"], ["hubSubqueueIB", "/api/dashboard/hub-subqueue-interval?subqueue=IB"], ["hubSubqueueDE", "/api/dashboard/hub-subqueue-interval?subqueue=DE"]];
   if (kind === "agents") return [...base, ["agents", "/api/dashboard/agents"], ["hourly", "/api/dashboard/agent-hourly"]];
   if (kind === "attendance") return [...base, ["attendance", "/api/dashboard/attendance"]];
   if (kind === "productivity") return [...base, ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"]];

@@ -398,6 +398,117 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
   };
 }
 
+export async function calculateHubSubqueueIntervalStatus(
+  subqueue: "IB" | "DE",
+  filters: CalculationFilters = {}
+): Promise<IntervalInboundResult> {
+  const PAGE_SIZE = 1000;
+  const grouped = new Map<number, {
+    received: number;
+    answered: number;
+    abandoned: number;
+    totalWeightedAht: number;
+    totalWeight: number;
+    callCount: number;
+  }>();
+
+  const totals = {
+    received: 0,
+    answered: 0,
+    abandoned: 0,
+    totalWeightedAht: 0,
+    totalWeight: 0,
+    callCount: 0,
+  };
+
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    let query = supabaseServer
+      .from("excel_rows")
+      .select("data, occurred_at")
+      .eq("metric_type", "call")
+      .not("occurred_at", "is", null)
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (filters.dateFrom) query = query.gte("date", filters.dateFrom);
+    if (filters.dateTo ?? filters.dateFrom) query = query.lte("date", filters.dateTo ?? filters.dateFrom!);
+    if (filters.timeFrom) query = query.filter("occurred_at::time", "gte", filters.timeFrom);
+    if (filters.timeTo) query = query.filter("occurred_at::time", "lte", filters.timeTo);
+    if (filters.lob) query = query.eq("lob", filters.lob);
+    if (filters.agentName) query = query.eq("agent_name", filters.agentName);
+
+    const { data, error } = await query;
+    if (error) throw new Error(`Hub subqueue interval query failed: ${error.message}`);
+
+    for (const row of (data ?? []) as Array<{ data: Record<string, unknown>; occurred_at: string }>) {
+      if (row.data._hub_subqueue !== subqueue) continue;
+
+      const hour = new Date(row.occurred_at).getUTCHours();
+      const hubReceived = numberFrom(row.data._hub_received);
+      const hubAnswered = numberFrom(row.data._hub_answered);
+      const hubAbandoned = numberFrom(row.data._hub_abandoned);
+      const ahtWithoutAcw = numberFrom(row.data._hub_aht_without_acw);
+
+      if (!grouped.has(hour)) {
+        grouped.set(hour, {
+          received: 0, answered: 0, abandoned: 0,
+          totalWeightedAht: 0, totalWeight: 0, callCount: 0,
+        });
+      }
+      const bucket = grouped.get(hour)!;
+
+      bucket.received += hubReceived;
+      bucket.answered += hubAnswered;
+      bucket.abandoned += hubAbandoned;
+      bucket.callCount++;
+
+      totals.received += hubReceived;
+      totals.answered += hubAnswered;
+      totals.abandoned += hubAbandoned;
+      totals.callCount++;
+
+      if (ahtWithoutAcw > 0 && hubAnswered > 0) {
+        bucket.totalWeightedAht += ahtWithoutAcw * hubAnswered;
+        bucket.totalWeight += hubAnswered;
+        totals.totalWeightedAht += ahtWithoutAcw * hubAnswered;
+        totals.totalWeight += hubAnswered;
+      }
+    }
+
+    hasMore = (data?.length ?? 0) === PAGE_SIZE;
+    offset += PAGE_SIZE;
+  }
+
+  const rows: IntervalInboundRow[] = [];
+  for (const [hour, bucket] of grouped) {
+    rows.push({
+      hour,
+      received: bucket.received,
+      answered: bucket.answered,
+      abandoned: bucket.abandoned,
+      avgAht: bucket.totalWeight > 0 ? round(bucket.totalWeightedAht / bucket.totalWeight) : 0,
+      callCount: bucket.callCount,
+      hubIbCount: 0,
+      hubDeCount: 0,
+    });
+  }
+
+  return {
+    rows: rows.sort((a, b) => a.hour - b.hour),
+    totals: {
+      received: totals.received,
+      answered: totals.answered,
+      abandoned: totals.abandoned,
+      avgAht: totals.totalWeight > 0 ? round(totals.totalWeightedAht / totals.totalWeight) : 0,
+      callCount: totals.callCount,
+      hubIbCount: 0,
+      hubDeCount: 0,
+    },
+  };
+}
+
 async function fetchMetricRows(
   filters: CalculationFilters,
   metricTypes: MetricType[]

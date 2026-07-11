@@ -26,6 +26,10 @@ export function transformAcdCallData(row: RawObjectRow): Record<string, unknown>
     _inb_answered: inbAnswered,
     _inb_abandoned: inbAbandoned,
     _aht_without_acw: parseNumber(findValue(row, acdCallsMapping.columns.inbAhtWithoutAcw)),
+    _hub_received: hubReceived > 0 ? 1 : 0,
+    _hub_answered: hubAnswered,
+    _hub_abandoned: hubAbandoned,
+    _hub_aht_without_acw: parseNumber(findValue(row, acdCallsMapping.columns.hubAhtWithoutAcw)),
     _hub_subqueue:
       parseNumber(findValue(row, acdCallsMapping.columns.hublineIb)) === 1
         ? "IB"
