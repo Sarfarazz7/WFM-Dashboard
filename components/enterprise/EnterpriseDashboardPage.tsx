@@ -526,12 +526,10 @@ function IntervalInboundPanel({
   title,
   data,
   loading,
-  showHubTable = true,
 }: {
   title?: string;
   data: IntervalInboundData | null;
   loading: boolean;
-  showHubTable?: boolean;
 }) {
   const sectionTitle = title ?? "Interval-wise Inbound Status";
 
@@ -594,35 +592,39 @@ function IntervalInboundPanel({
           lineName="AHT (excl. ACW)"
         />
       </div>
-      {showHubTable && (totals.hubIbCount > 0 || totals.hubDeCount > 0) ? (
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[480px] text-xs">
-            <thead>
-              <tr className="border-b border-ink-600 text-left text-mist-400">
-                <th className="pb-2 pr-3 font-normal">Hour</th>
-                <th className="pb-2 px-3 font-normal text-right">Hub IB</th>
-                <th className="pb-2 px-3 font-normal text-right">Hub DE</th>
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[480px] text-xs">
+          <thead>
+            <tr className="border-b border-ink-600 text-left text-mist-400">
+              <th className="pb-2 pr-3 font-normal">Hour</th>
+              <th className="pb-2 px-3 font-normal text-right">Received</th>
+              <th className="pb-2 px-3 font-normal text-right">Answered</th>
+              <th className="pb-2 px-3 font-normal text-right">Abandoned</th>
+              <th className="pb-2 px-3 font-normal text-right">AHT (excl. ACW)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.hour} className="border-b border-ink-700/70 last:border-0">
+                <td className="py-1.5 pr-3 text-mist-300">
+                  {String(r.hour).padStart(2, "0")}:00
+                </td>
+                <td className="py-1.5 px-3 text-right text-mist-300">{r.received}</td>
+                <td className="py-1.5 px-3 text-right text-mist-300">{r.answered}</td>
+                <td className="py-1.5 px-3 text-right text-mist-300">{r.abandoned}</td>
+                <td className="py-1.5 px-3 text-right text-mist-300">{r.avgAht}s</td>
               </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.hour} className="border-b border-ink-700/70 last:border-0">
-                  <td className="py-1.5 pr-3 text-mist-300">
-                    {String(r.hour).padStart(2, "0")}:00
-                  </td>
-                  <td className="py-1.5 px-3 text-right text-mist-300">{r.hubIbCount}</td>
-                  <td className="py-1.5 px-3 text-right text-mist-300">{r.hubDeCount}</td>
-                </tr>
-              ))}
-              <tr className="font-semibold text-mist-200">
-                <td className="py-1.5 pr-3">Total</td>
-                <td className="py-1.5 px-3 text-right">{totals.hubIbCount}</td>
-                <td className="py-1.5 px-3 text-right">{totals.hubDeCount}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      ) : null}
+            ))}
+            <tr className="font-semibold text-mist-200">
+              <td className="py-1.5 pr-3">Total</td>
+              <td className="py-1.5 px-3 text-right">{totals.received}</td>
+              <td className="py-1.5 px-3 text-right">{totals.answered}</td>
+              <td className="py-1.5 px-3 text-right">{totals.abandoned}</td>
+              <td className="py-1.5 px-3 text-right">{totals.avgAht}s</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </Section>
   );
 }
@@ -678,7 +680,6 @@ function IntervalStatusTabs({
         title={panelTitle}
         data={panelData}
         loading={loading}
-        showHubTable={activeTab === "inbound"}
       />
     </section>
   );
