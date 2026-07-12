@@ -10,7 +10,8 @@ export const callDetailsParser: SheetParser = {
     const sheetName = findSheetName(context.workbook, callDetailsMapping.expectedSheetName);
     if (!sheetName) return [];
 
-    return sheetToObjectRows(context.workbook, sheetName).map((row, index) => {
+    const allColumnHeaders = Object.values(callDetailsMapping.columns);
+    return sheetToObjectRows(context.workbook, sheetName, allColumnHeaders).map((row, index) => {
       const dateValue = findValue(row, callDetailsMapping.columns.callTime);
       return {
         sheet_name: sheetName,

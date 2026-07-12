@@ -153,10 +153,54 @@ export function findSheetName(workbook: XLSX.WorkBook, expectedName: string): st
   return workbook.SheetNames.find((name) => normalizeHeader(name) === wanted) ?? null;
 }
 
-export function sheetToObjectRows(workbook: XLSX.WorkBook, sheetName: string): RawObjectRow[] {
+export function sheetToObjectRows(
+  workbook: XLSX.WorkBook,
+  sheetName: string,
+  columnHeaders?: string[]
+): RawObjectRow[] {
   const worksheet = workbook.Sheets[sheetName];
   if (!worksheet) return [];
 
+  if (columnHeaders && columnHeaders.length > 0 && worksheet["!ref"]) {
+    // Read header row to find which column indices we need
+    const headerRows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+      header: 1,
+      defval: null,
+      raw: true,
+      range: 0,
+    });
+    const headerRow = headerRows[0];
+    if (!headerRow) return [];
+
+    const wanted = columnHeaders.map((h) => normalizeHeader(h));
+    const matchedIndices: number[] = [];
+    for (let i = 0; i < headerRow.length; i++) {
+      const cellHeader = normalizeHeader(String(headerRow[i] ?? ""));
+      if (wanted.includes(cellHeader)) {
+        matchedIndices.push(i);
+      }
+    }
+
+    if (matchedIndices.length === 0) return [];
+
+    // Build a range covering only the matched columns × all data rows
+    const fullRange = XLSX.utils.decode_range(worksheet["!ref"]);
+    const minCol = Math.min(...matchedIndices);
+    const maxCol = Math.max(...matchedIndices);
+    const rangeStr =
+      XLSX.utils.encode_col(minCol) + "1:" +
+      XLSX.utils.encode_col(maxCol) + (fullRange.e.r + 1);
+
+    const rows = XLSX.utils.sheet_to_json<RawObjectRow>(worksheet, {
+      defval: null,
+      raw: true,
+      range: rangeStr,
+    });
+
+    return removeEmptyRows(rows);
+  }
+
+  // Default: read all columns (unchanged behavior for other sheets)
   const rows = XLSX.utils.sheet_to_json<RawObjectRow>(worksheet, {
     defval: null,
     raw: true,
