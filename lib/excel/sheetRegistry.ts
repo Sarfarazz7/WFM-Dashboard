@@ -1,6 +1,7 @@
 import type { SheetParser } from "./types";
 import {
   acdCallsParser,
+  callDetailsParser,
   intSummaryParser,
   prodSummaryParser,
   sessionDetailsParser,
@@ -29,6 +30,7 @@ export class SheetRegistry {
 
 export const defaultSheetParsers: SheetParser[] = [
   acdCallsParser,
+  callDetailsParser,
   ticketClosureParser,
   workbenchParser,
   sessionDetailsParser,

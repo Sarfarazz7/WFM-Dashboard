@@ -1,6 +1,6 @@
 // Shared types used across API routes, lib utilities, and components.
 
-export type MetricType = "call" | "ticket" | "shrinkage" | "session" | "productivity" | "interval";
+export type MetricType = "call" | "ticket" | "shrinkage" | "session" | "productivity" | "interval" | "outbound_call";
 
 export interface ExcelRow {
   id: string;

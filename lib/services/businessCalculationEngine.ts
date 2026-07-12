@@ -139,6 +139,9 @@ export interface IntervalInboundRow {
   callCount: number;
   hubIbCount: number;
   hubDeCount: number;
+  outboundDialled: number;
+  outboundConnected: number;
+  connectedPct: number;
 }
 
 export interface IntervalInboundResult {
@@ -151,6 +154,9 @@ export interface IntervalInboundResult {
     callCount: number;
     hubIbCount: number;
     hubDeCount: number;
+    outboundDialled: number;
+    outboundConnected: number;
+    connectedPct: number;
   };
 }
 
@@ -293,6 +299,8 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
     callCount: number;
     hubIbCount: number;
     hubDeCount: number;
+    outboundDialled: number;
+    outboundConnected: number;
   }>();
 
   const totals = {
@@ -304,6 +312,8 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
     callCount: 0,
     hubIbCount: 0,
     hubDeCount: 0,
+    outboundDialled: 0,
+    outboundConnected: 0,
   };
 
   let offset = 0;
@@ -340,6 +350,7 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
           received: 0, answered: 0, abandoned: 0,
           totalWeightedAht: 0, totalWeight: 0, callCount: 0,
           hubIbCount: 0, hubDeCount: 0,
+          outboundDialled: 0, outboundConnected: 0,
         });
       }
       const bucket = grouped.get(hour)!;
@@ -370,8 +381,78 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
     offset += PAGE_SIZE;
   }
 
+  // === Outbound pass ===
+  const outboundGrouped = new Map<number, { dialled: number; connected: number }>();
+  let outboundTotals = { dialled: 0, connected: 0 };
+
+  let outOffset = 0;
+  let outHasMore = true;
+
+  while (outHasMore) {
+    let outQuery = supabaseServer
+      .from("excel_rows")
+      .select("id, data, occurred_at")
+      .eq("metric_type", "outbound_call")
+      .not("occurred_at", "is", null)
+      .order("id", { ascending: true })
+      .range(outOffset, outOffset + PAGE_SIZE - 1);
+
+    if (filters.dateFrom) outQuery = outQuery.gte("date", filters.dateFrom);
+    if (filters.dateTo ?? filters.dateFrom) outQuery = outQuery.lte("date", filters.dateTo ?? filters.dateFrom!);
+    if (filters.timeFrom) outQuery = outQuery.filter("occurred_at::time", "gte", filters.timeFrom);
+    if (filters.timeTo) outQuery = outQuery.filter("occurred_at::time", "lte", filters.timeTo);
+    if (filters.lob) outQuery = outQuery.eq("lob", filters.lob);
+    if (filters.agentName) outQuery = outQuery.eq("agent_name", filters.agentName);
+
+    const { data: outData, error: outError } = await outQuery;
+    if (outError) throw new Error(`Interval outbound query failed: ${outError.message}`);
+
+    for (const row of (outData ?? []) as Array<{ data: Record<string, unknown>; occurred_at: string }>) {
+      const hour = new Date(row.occurred_at).getUTCHours();
+      const dialled = numberFrom(row.data._is_outbound_dialled);
+      const connected = numberFrom(row.data._is_outbound_connected);
+
+      if (!outboundGrouped.has(hour)) {
+        outboundGrouped.set(hour, { dialled: 0, connected: 0 });
+      }
+      const bucket = outboundGrouped.get(hour)!;
+      bucket.dialled += dialled;
+      bucket.connected += connected;
+      outboundTotals.dialled += dialled;
+      outboundTotals.connected += connected;
+    }
+
+    outHasMore = (outData?.length ?? 0) === PAGE_SIZE;
+    outOffset += PAGE_SIZE;
+  }
+
+  // === Merge outbound into inbound buckets ===
+  for (const [hour, outBucket] of outboundGrouped) {
+    if (!grouped.has(hour)) {
+      grouped.set(hour, {
+        received: 0, answered: 0, abandoned: 0,
+        totalWeightedAht: 0, totalWeight: 0, callCount: 0,
+        hubIbCount: 0, hubDeCount: 0,
+        outboundDialled: 0, outboundConnected: 0,
+      });
+    }
+    const bucket = grouped.get(hour)!;
+    bucket.outboundDialled = outBucket.dialled;
+    bucket.outboundConnected = outBucket.connected;
+  }
+
+  // For hours that exist in inbound but NOT in outbound, ensure outbound fields are zero
+  for (const [, bucket] of grouped) {
+    if (bucket.outboundDialled === 0 && bucket.outboundConnected === 0) continue;
+  }
+
+  // === Build output ===
   const rows: IntervalInboundRow[] = [];
   for (const [hour, bucket] of grouped) {
+    const connectedPct = bucket.outboundDialled > 0
+      ? Math.round((bucket.outboundConnected / bucket.outboundDialled) * 10000) / 100
+      : 0;
+
     rows.push({
       hour,
       received: bucket.received,
@@ -381,6 +462,9 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
       callCount: bucket.callCount,
       hubIbCount: bucket.hubIbCount,
       hubDeCount: bucket.hubDeCount,
+      outboundDialled: bucket.outboundDialled,
+      outboundConnected: bucket.outboundConnected,
+      connectedPct,
     });
   }
 
@@ -394,6 +478,11 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
       callCount: totals.callCount,
       hubIbCount: totals.hubIbCount,
       hubDeCount: totals.hubDeCount,
+      outboundDialled: outboundTotals.dialled,
+      outboundConnected: outboundTotals.connected,
+      connectedPct: outboundTotals.dialled > 0
+        ? Math.round((outboundTotals.connected / outboundTotals.dialled) * 10000) / 100
+        : 0,
     },
   };
 }
@@ -492,6 +581,9 @@ export async function calculateHubSubqueueIntervalStatus(
       callCount: bucket.callCount,
       hubIbCount: 0,
       hubDeCount: 0,
+      outboundDialled: 0,
+      outboundConnected: 0,
+      connectedPct: 0,
     });
   }
 
@@ -505,6 +597,9 @@ export async function calculateHubSubqueueIntervalStatus(
       callCount: totals.callCount,
       hubIbCount: 0,
       hubDeCount: 0,
+      outboundDialled: 0,
+      outboundConnected: 0,
+      connectedPct: 0,
     },
   };
 }

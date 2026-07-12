@@ -1,4 +1,5 @@
 export { acdCallsParser } from "./acdCallsParser";
+export { callDetailsParser } from "./callDetailsParser";
 export { ticketClosureParser } from "./ticketClosureParser";
 export { workbenchParser } from "./workbenchParser";
 export { sessionDetailsParser } from "./sessionDetailsParser";

@@ -179,6 +179,8 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
             hubIbData={hubSubqueueIB}
             hubDeData={hubSubqueueDE}
             loading={loading}
+            dateFrom={filters.dateFrom}
+            dateTo={filters.dateTo}
           />
           <HeatmapPanel rows={heatmapRows} loading={loading} />
           <NaturalLanguageQuery dateFrom={filters.dateFrom} dateTo={filters.dateTo} lob={filters.lob} />
@@ -511,6 +513,9 @@ type IntervalInboundData = {
     callCount: number;
     hubIbCount: number;
     hubDeCount: number;
+    outboundDialled: number;
+    outboundConnected: number;
+    connectedPct: number;
   }>;
   totals: {
     received: number;
@@ -520,6 +525,9 @@ type IntervalInboundData = {
     callCount: number;
     hubIbCount: number;
     hubDeCount: number;
+    outboundDialled: number;
+    outboundConnected: number;
+    connectedPct: number;
   };
 };
 
@@ -527,10 +535,14 @@ function IntervalInboundPanel({
   title,
   data,
   loading,
+  dateFrom,
+  dateTo,
 }: {
   title?: string;
   data: IntervalInboundData | null;
   loading: boolean;
+  dateFrom?: string;
+  dateTo?: string;
 }) {
   const sectionTitle = title ?? "Interval-wise Inbound Status";
 
@@ -554,6 +566,16 @@ function IntervalInboundPanel({
   const abandonPct = totals.received > 0 ? Math.round((totals.abandoned / totals.received) * 10000) / 100 : 0;
   const answerPct = totals.received > 0 ? Math.round((totals.answered / totals.received) * 10000) / 100 : 0;
 
+  const formatDate = (iso: string) => {
+    const d = new Date(iso + "T00:00:00");
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  };
+  const dateBanner = dateFrom && dateTo
+    ? dateFrom === dateTo
+      ? formatDate(dateFrom)
+      : `${formatDate(dateFrom)} \u2013 ${formatDate(dateTo)}`
+    : null;
+
   const chartData = rows.map((r) => ({
     ...r,
     label: `${String(r.hour).padStart(2, "0")}:00\u2013${String((r.hour + 1) % 24).padStart(2, "0")}:00`,
@@ -568,10 +590,29 @@ function IntervalInboundPanel({
     ["AHT (excl. ACW)", totals.avgAht, "s"],
   ];
 
+  const outboundKpiCards: Array<[string, string | number, string]> = [
+    ["Outbound Dialled", totals.outboundDialled, ""],
+    ["Outbound Connected", totals.outboundConnected, ""],
+    ["Connected %", totals.connectedPct, "%"],
+  ];
+
   return (
     <Section title={sectionTitle}>
+      {dateBanner && (
+        <p className="mb-3 text-xs font-medium text-mist-400">{dateBanner}</p>
+      )}
       <div className="grid grid-cols-2 gap-3 mb-4 lg:grid-cols-6">
         {kpiCards.map(([label, value, suffix]) => (
+          <div key={label} className="border border-ink-600/60 bg-ink-900 p-3">
+            <p className="label-eyebrow">{label}</p>
+            <p className="mt-1 text-xl font-display font-semibold text-mist-50">
+              {value}{suffix}
+            </p>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        {outboundKpiCards.map(([label, value, suffix]) => (
           <div key={label} className="border border-ink-600/60 bg-ink-900 p-3">
             <p className="label-eyebrow">{label}</p>
             <p className="mt-1 text-xl font-display font-semibold text-mist-50">
@@ -594,7 +635,7 @@ function IntervalInboundPanel({
         />
       </div>
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[480px] text-xs">
+        <table className="w-full min-w-[640px] text-xs">
           <thead>
             <tr className="border-b border-ink-600 text-left text-mist-400">
               <th className="pb-2 pr-3 font-normal">Hour</th>
@@ -602,6 +643,9 @@ function IntervalInboundPanel({
               <th className="pb-2 px-3 font-normal text-right">Answered</th>
               <th className="pb-2 px-3 font-normal text-right">Abandoned</th>
               <th className="pb-2 px-3 font-normal text-right">AHT (excl. ACW)</th>
+              <th className="pb-2 px-3 font-normal text-right">Out. Dialled</th>
+              <th className="pb-2 px-3 font-normal text-right">Out. Connected</th>
+              <th className="pb-2 px-3 font-normal text-right">Connected %</th>
             </tr>
           </thead>
           <tbody>
@@ -614,6 +658,9 @@ function IntervalInboundPanel({
                 <td className="py-1.5 px-3 text-right text-mist-300">{r.answered}</td>
                 <td className="py-1.5 px-3 text-right text-mist-300">{r.abandoned}</td>
                 <td className="py-1.5 px-3 text-right text-mist-300">{r.avgAht}s</td>
+                <td className="py-1.5 px-3 text-right text-mist-300">{r.outboundDialled}</td>
+                <td className="py-1.5 px-3 text-right text-mist-300">{r.outboundConnected}</td>
+                <td className="py-1.5 px-3 text-right text-mist-300">{r.connectedPct}%</td>
               </tr>
             ))}
             <tr className="font-semibold text-mist-200">
@@ -622,6 +669,9 @@ function IntervalInboundPanel({
               <td className="py-1.5 px-3 text-right">{totals.answered}</td>
               <td className="py-1.5 px-3 text-right">{totals.abandoned}</td>
               <td className="py-1.5 px-3 text-right">{totals.avgAht}s</td>
+              <td className="py-1.5 px-3 text-right">{totals.outboundDialled}</td>
+              <td className="py-1.5 px-3 text-right">{totals.outboundConnected}</td>
+              <td className="py-1.5 px-3 text-right">{totals.connectedPct}%</td>
             </tr>
           </tbody>
         </table>
@@ -637,11 +687,15 @@ function IntervalStatusTabs({
   hubIbData,
   hubDeData,
   loading,
+  dateFrom,
+  dateTo,
 }: {
   inboundData: IntervalInboundData | null;
   hubIbData: IntervalInboundData | null;
   hubDeData: IntervalInboundData | null;
   loading: boolean;
+  dateFrom?: string;
+  dateTo?: string;
 }) {
   const [activeTab, setActiveTab] = useState<TabKey>("inbound");
 
@@ -681,6 +735,8 @@ function IntervalStatusTabs({
         title={panelTitle}
         data={panelData}
         loading={loading}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
       />
     </section>
   );

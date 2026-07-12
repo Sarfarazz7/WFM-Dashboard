@@ -1,4 +1,5 @@
 export { acdCallsMapping } from "./acdCalls";
+export { callDetailsMapping } from "./callDetails";
 export { ticketClosureMapping } from "./ticketClosure";
 export { workbenchMapping } from "./workbench";
 export { sessionDetailsMapping } from "./sessionDetails";
