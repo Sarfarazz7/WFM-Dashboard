@@ -85,6 +85,7 @@ async function backfill() {
       .select("id, data")
       .eq("metric_type", "call")
       .not("occurred_at", "is", null)
+      .order("id")
       .range(offset, offset + BATCH_SIZE - 1);
 
     if (error) {
@@ -149,6 +150,7 @@ async function backfill() {
       .select("id, data")
       .eq("metric_type", "call")
       .not("occurred_at", "is", null)
+      .order("id")
       .range(offset, offset + BATCH_SIZE - 1);
 
     if (error) {

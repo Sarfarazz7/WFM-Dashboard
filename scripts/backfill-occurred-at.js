@@ -86,6 +86,7 @@ async function backfill() {
       .select("id, metric_type, data")
       .is("occurred_at", null)
       .in("metric_type", Object.keys(TIME_KEYS_BY_METRIC))
+      .order("id")
       .range(offset, offset + BATCH_SIZE - 1);
 
     if (error) {
@@ -128,7 +129,7 @@ async function backfill() {
     }
 
     console.log(`Processed ${offset + rows.length} rows, updated ${totalUpdated} so far...`);
-    offset += BATCH_SIZE;
+    offset += rows.length;
 
     if (rows.length < BATCH_SIZE) {
       hasMore = false;
