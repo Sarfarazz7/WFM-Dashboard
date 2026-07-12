@@ -103,8 +103,9 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
         const params = buildParams(filters);
         const endpoints = endpointsFor(kind);
         const responses = await Promise.all(
-          endpoints.map(async ([key, path]) => {
-            const res = await fetch(`${path}?${params}`, { signal: controller.signal });
+          endpoints.map(async ([key, path, extra]) => {
+            const url = extra ? `${path}?${extra}&${params}` : `${path}?${params}`;
+            const res = await fetch(url, { signal: controller.signal });
             const json = await parseApiResponse(res);
             return [key, json] as const;
           })
@@ -745,12 +746,12 @@ function buildParams(filters: Filters) {
   return params.toString();
 }
 
-function endpointsFor(kind: PageKind): Array<[string, string]> {
-  const base: Array<[string, string]> = [
+function endpointsFor(kind: PageKind): Array<[string, string, string?]> {
+  const base: Array<[string, string, string?]> = [
     ["summary", "/api/dashboard/summary"],
     ["trends", "/api/dashboard/trends"],
   ];
-  if (kind === "executive") return [...base, ["overview", "/api/dashboard"], ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"], ["intervalInbound", "/api/dashboard/interval-inbound"], ["hubSubqueueIB", "/api/dashboard/hub-subqueue-interval?subqueue=IB"], ["hubSubqueueDE", "/api/dashboard/hub-subqueue-interval?subqueue=DE"]];
+  if (kind === "executive") return [...base, ["overview", "/api/dashboard"], ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"], ["intervalInbound", "/api/dashboard/interval-inbound"], ["hubSubqueueIB", "/api/dashboard/hub-subqueue-interval", "subqueue=IB"], ["hubSubqueueDE", "/api/dashboard/hub-subqueue-interval", "subqueue=DE"]];
   if (kind === "agents") return [...base, ["agents", "/api/dashboard/agents"], ["hourly", "/api/dashboard/agent-hourly"]];
   if (kind === "attendance") return [...base, ["attendance", "/api/dashboard/attendance"]];
   if (kind === "productivity") return [...base, ["agents", "/api/dashboard/agents"], ["team", "/api/dashboard/team"]];
