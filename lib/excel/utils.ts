@@ -162,12 +162,21 @@ export function sheetToObjectRows(
   if (!worksheet) return [];
 
   if (columnHeaders && columnHeaders.length > 0 && worksheet["!ref"]) {
-    // Read header row to find which column indices we need
+    // Read header row to find which column indices we need.
+    // IMPORTANT: range must be an explicit first-row-only range.
+    // Using `range: 0` causes SheetJS to read ALL rows (start at row 0,
+    // read to end of sheet), which for Call Details means iterating
+    // 12,396 rows × 1,663 columns (~20.6M cells) — taking >100s.
+    const fullRange = XLSX.utils.decode_range(worksheet["!ref"]);
+    const headerOnlyRange = {
+      s: { r: 0, c: 0 },
+      e: { r: 0, c: fullRange.e.c },
+    };
     const headerRows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
       header: 1,
       defval: null,
       raw: true,
-      range: 0,
+      range: headerOnlyRange,
     });
     const headerRow = headerRows[0];
     if (!headerRow) return [];
@@ -184,7 +193,6 @@ export function sheetToObjectRows(
     if (matchedIndices.length === 0) return [];
 
     // Build a range covering only the matched columns × all data rows
-    const fullRange = XLSX.utils.decode_range(worksheet["!ref"]);
     const minCol = Math.min(...matchedIndices);
     const maxCol = Math.max(...matchedIndices);
     const rangeStr =
