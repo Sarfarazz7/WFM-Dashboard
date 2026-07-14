@@ -52,13 +52,13 @@ function computeHubFields(data) {
   const hubReceived = toNumber(data["HUB Received"]);
   const hubAnswered = toNumber(data["HUB Answered"]);
   const hubAbandoned = toNumber(data["HUB Abandoned"]);
-  const hubAht = toNumber(data["HUB AHT"]);
+  const hubAhtWithoutAcw = toNumber(data["HUB AHT (Without ACW)"]) ?? toNumber(data["HUB AHT"]);
 
   return {
     _hub_received: hubReceived > 0 ? 1 : 0,
     _hub_answered: hubAnswered,
     _hub_abandoned: hubAbandoned,
-    _hub_aht_without_acw: hubAht,
+    _hub_aht_without_acw: hubAhtWithoutAcw,
   };
 }
 
