@@ -6,15 +6,18 @@ import { supabaseServer } from "@/lib/supabaseClient";
  * The table is tiny (~120 rows), so this is a single cheap SELECT.
  */
 export async function fetchAgentNameMap(): Promise<Map<string, string>> {
-  const { data, error } = await supabaseServer
-    .from("agent_names")
-    .select("dg_code, display_name");
+  try {
+    const { data, error } = await supabaseServer
+      .from("agent_names")
+      .select("dg_code, display_name");
 
-  if (error) {
-    throw new Error(`Failed to fetch agent names: ${error.message}`);
+    if (error) throw error;
+
+    return new Map((data ?? []).map((r) => [r.dg_code, r.display_name]));
+  } catch (err) {
+    console.warn("[agentNameResolver] Failed to fetch agent names — falling back to raw codes:", err);
+    return new Map();
   }
-
-  return new Map((data ?? []).map((r) => [r.dg_code, r.display_name]));
 }
 
 /**

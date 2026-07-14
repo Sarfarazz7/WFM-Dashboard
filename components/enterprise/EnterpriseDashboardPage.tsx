@@ -99,7 +99,7 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
     fetch("/api/dashboard/agent-names")
       .then((res) => res.json())
       .then((json) => setAgentNames(Array.isArray(json) ? json : []))
-      .catch(() => {});
+      .catch((err) => console.warn("[Dashboard] Failed to load agent names:", err));
   }, []);
 
   useEffect(() => {
