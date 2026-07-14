@@ -28,7 +28,7 @@ export interface RankingResult {
   rowCount: number;
 }
 
-interface StoredMetricRow {
+export interface StoredMetricRow {
   date: string | null;
   lob: string | null;
   agent_name: string | null;
@@ -103,10 +103,7 @@ export async function calculateAHT(filters: CalculationFilters = {}): Promise<Ca
 
 export async function calculateUtilization(filters: CalculationFilters = {}): Promise<CalculationResult> {
   const rows = await fetchMetricRows(filters, ["call", ...ACTIVE_TIME_METRICS]);
-  const activeSeconds = calculateHandlingSeconds(rows) + calculateReadyTimeValue(rows);
-  const loginSeconds = calculateLoginSeconds(rows);
-
-  return percentResult(loginSeconds > 0 ? activeSeconds / loginSeconds : 0, rows.length);
+  return calculateUtilizationFromRows(rows);
 }
 
 export async function calculateCallsPerHour(filters: CalculationFilters = {}): Promise<CalculationResult> {
@@ -286,6 +283,157 @@ export async function calculateAgentHourlyAHT(filters: CalculationFilters = {}):
   }
 
   return result.sort((a, b) => a.agent.localeCompare(b.agent) || a.hour - b.hour);
+}
+
+// TODO: Uses getUTCHours() — confirm this matches the timezone our ops team
+// expects to see on the dashboard (likely IST). If timestamps aren't already
+// converted to local time before reaching this function, hourly buckets may
+// be offset from what the team sees on the dashboard. See convertExcelDatetime
+// in lib/excel/utils.ts which hardcodes ".000Z" on raw wall-clock times.
+export function processIntervalInboundRows(
+  inboundRows: Array<{ data: Record<string, unknown>; occurred_at: string }>,
+  outboundRows: Array<{ data: Record<string, unknown>; occurred_at: string }>
+): IntervalInboundResult {
+  const grouped = new Map<number, {
+    received: number;
+    answered: number;
+    abandoned: number;
+    totalWeightedAht: number;
+    totalWeight: number;
+    callCount: number;
+    hubIbCount: number;
+    hubDeCount: number;
+    outboundDialled: number;
+    outboundConnected: number;
+  }>();
+
+  const totals = {
+    received: 0,
+    answered: 0,
+    abandoned: 0,
+    totalWeightedAht: 0,
+    totalWeight: 0,
+    callCount: 0,
+    hubIbCount: 0,
+    hubDeCount: 0,
+    outboundDialled: 0,
+    outboundConnected: 0,
+  };
+
+  // Inbound pass
+  for (const row of inboundRows) {
+    const hour = new Date(row.occurred_at).getUTCHours();
+    const inbReceived = numberFrom(row.data._inb_received);
+    const inbAnswered = numberFrom(row.data._inb_answered);
+    const inbAbandoned = numberFrom(row.data._inb_abandoned);
+    const ahtWithoutAcw = numberFrom(row.data._aht_without_acw) ?? numberFrom(row.data._aht);
+    const hubSubqueue = row.data._hub_subqueue;
+
+    if (!grouped.has(hour)) {
+      grouped.set(hour, {
+        received: 0, answered: 0, abandoned: 0,
+        totalWeightedAht: 0, totalWeight: 0, callCount: 0,
+        hubIbCount: 0, hubDeCount: 0,
+        outboundDialled: 0, outboundConnected: 0,
+      });
+    }
+    const bucket = grouped.get(hour)!;
+
+    bucket.received += inbReceived;
+    bucket.answered += inbAnswered;
+    bucket.abandoned += inbAbandoned;
+    bucket.callCount++;
+    if (hubSubqueue === "IB") bucket.hubIbCount++;
+    if (hubSubqueue === "DE") bucket.hubDeCount++;
+
+    totals.received += inbReceived;
+    totals.answered += inbAnswered;
+    totals.abandoned += inbAbandoned;
+    totals.callCount++;
+    if (hubSubqueue === "IB") totals.hubIbCount++;
+    if (hubSubqueue === "DE") totals.hubDeCount++;
+
+    if (ahtWithoutAcw > 0 && inbAnswered > 0) {
+      bucket.totalWeightedAht += ahtWithoutAcw * inbAnswered;
+      bucket.totalWeight += inbAnswered;
+      totals.totalWeightedAht += ahtWithoutAcw * inbAnswered;
+      totals.totalWeight += inbAnswered;
+    }
+  }
+
+  // Outbound pass
+  const outboundGrouped = new Map<number, { dialled: number; connected: number }>();
+  let outboundTotals = { dialled: 0, connected: 0 };
+
+  for (const row of outboundRows) {
+    const hour = new Date(row.occurred_at).getUTCHours();
+    const dialled = numberFrom(row.data._is_outbound_dialled);
+    const connected = numberFrom(row.data._is_outbound_connected);
+
+    if (!outboundGrouped.has(hour)) {
+      outboundGrouped.set(hour, { dialled: 0, connected: 0 });
+    }
+    const bucket = outboundGrouped.get(hour)!;
+    bucket.dialled += dialled;
+    bucket.connected += connected;
+    outboundTotals.dialled += dialled;
+    outboundTotals.connected += connected;
+  }
+
+  // Merge outbound into inbound buckets
+  for (const [hour, outBucket] of outboundGrouped) {
+    if (!grouped.has(hour)) {
+      grouped.set(hour, {
+        received: 0, answered: 0, abandoned: 0,
+        totalWeightedAht: 0, totalWeight: 0, callCount: 0,
+        hubIbCount: 0, hubDeCount: 0,
+        outboundDialled: 0, outboundConnected: 0,
+      });
+    }
+    const bucket = grouped.get(hour)!;
+    bucket.outboundDialled = outBucket.dialled;
+    bucket.outboundConnected = outBucket.connected;
+  }
+
+  // Build output
+  const resultRows: IntervalInboundRow[] = [];
+  for (const [hour, bucket] of grouped) {
+    const connectedPct = bucket.outboundDialled > 0
+      ? Math.round((bucket.outboundConnected / bucket.outboundDialled) * 10000) / 100
+      : 0;
+
+    resultRows.push({
+      hour,
+      received: bucket.received,
+      answered: bucket.answered,
+      abandoned: bucket.abandoned,
+      avgAht: bucket.totalWeight > 0 ? round(bucket.totalWeightedAht / bucket.totalWeight) : 0,
+      callCount: bucket.callCount,
+      hubIbCount: bucket.hubIbCount,
+      hubDeCount: bucket.hubDeCount,
+      outboundDialled: bucket.outboundDialled,
+      outboundConnected: bucket.outboundConnected,
+      connectedPct,
+    });
+  }
+
+  return {
+    rows: resultRows.sort((a, b) => a.hour - b.hour),
+    totals: {
+      received: totals.received,
+      answered: totals.answered,
+      abandoned: totals.abandoned,
+      avgAht: totals.totalWeight > 0 ? round(totals.totalWeightedAht / totals.totalWeight) : 0,
+      callCount: totals.callCount,
+      hubIbCount: totals.hubIbCount,
+      hubDeCount: totals.hubDeCount,
+      outboundDialled: outboundTotals.dialled,
+      outboundConnected: outboundTotals.connected,
+      connectedPct: outboundTotals.dialled > 0
+        ? Math.round((outboundTotals.connected / outboundTotals.dialled) * 10000) / 100
+        : 0,
+    },
+  };
 }
 
 export async function calculateIntervalInboundStatus(filters: CalculationFilters = {}): Promise<IntervalInboundResult> {
@@ -483,6 +631,102 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
       connectedPct: outboundTotals.dialled > 0
         ? Math.round((outboundTotals.connected / outboundTotals.dialled) * 10000) / 100
         : 0,
+    },
+  };
+}
+
+// TODO: Uses getUTCHours() — confirm this matches the timezone our ops team
+// expects to see on the dashboard (likely IST). If timestamps aren't already
+// converted to local time before reaching this function, hourly buckets may
+// be offset from what the team sees on the dashboard. See convertExcelDatetime
+// in lib/excel/utils.ts which hardcodes ".000Z" on raw wall-clock times.
+export function processHubSubqueueRows(
+  rows: Array<{ data: Record<string, unknown>; occurred_at: string }>,
+  subqueue: "IB" | "DE"
+): IntervalInboundResult {
+  const grouped = new Map<number, {
+    received: number;
+    answered: number;
+    abandoned: number;
+    totalWeightedAht: number;
+    totalWeight: number;
+    callCount: number;
+  }>();
+
+  const totals = {
+    received: 0,
+    answered: 0,
+    abandoned: 0,
+    totalWeightedAht: 0,
+    totalWeight: 0,
+    callCount: 0,
+  };
+
+  for (const row of rows) {
+    if (row.data._hub_subqueue !== subqueue) continue;
+
+    const hour = new Date(row.occurred_at).getUTCHours();
+    const hubReceived = numberFrom(row.data._hub_received);
+    const hubAnswered = numberFrom(row.data._hub_answered);
+    const hubAbandoned = numberFrom(row.data._hub_abandoned);
+    const ahtWithoutAcw = numberFrom(row.data._hub_aht_without_acw) ?? numberFrom(row.data._aht);
+
+    if (!grouped.has(hour)) {
+      grouped.set(hour, {
+        received: 0, answered: 0, abandoned: 0,
+        totalWeightedAht: 0, totalWeight: 0, callCount: 0,
+      });
+    }
+    const bucket = grouped.get(hour)!;
+
+    bucket.received += hubReceived;
+    bucket.answered += hubAnswered;
+    bucket.abandoned += hubAbandoned;
+    bucket.callCount++;
+
+    totals.received += hubReceived;
+    totals.answered += hubAnswered;
+    totals.abandoned += hubAbandoned;
+    totals.callCount++;
+
+    if (ahtWithoutAcw > 0 && hubAnswered > 0) {
+      bucket.totalWeightedAht += ahtWithoutAcw * hubAnswered;
+      bucket.totalWeight += hubAnswered;
+      totals.totalWeightedAht += ahtWithoutAcw * hubAnswered;
+      totals.totalWeight += hubAnswered;
+    }
+  }
+
+  const resultRows: IntervalInboundRow[] = [];
+  for (const [hour, bucket] of grouped) {
+    resultRows.push({
+      hour,
+      received: bucket.received,
+      answered: bucket.answered,
+      abandoned: bucket.abandoned,
+      avgAht: bucket.totalWeight > 0 ? round(bucket.totalWeightedAht / bucket.totalWeight) : 0,
+      callCount: bucket.callCount,
+      hubIbCount: 0,
+      hubDeCount: 0,
+      outboundDialled: 0,
+      outboundConnected: 0,
+      connectedPct: 0,
+    });
+  }
+
+  return {
+    rows: resultRows.sort((a, b) => a.hour - b.hour),
+    totals: {
+      received: totals.received,
+      answered: totals.answered,
+      abandoned: totals.abandoned,
+      avgAht: totals.totalWeight > 0 ? round(totals.totalWeightedAht / totals.totalWeight) : 0,
+      callCount: totals.callCount,
+      hubIbCount: 0,
+      hubDeCount: 0,
+      outboundDialled: 0,
+      outboundConnected: 0,
+      connectedPct: 0,
     },
   };
 }
@@ -719,6 +963,12 @@ function calculateUtilizationValue(rows: StoredMetricRow[]) {
   return loginSeconds > 0 ? activeSeconds / loginSeconds : 0;
 }
 
+export function calculateUtilizationFromRows(rows: StoredMetricRow[]): CalculationResult {
+  const activeSeconds = calculateHandlingSeconds(rows) + calculateReadyTimeValue(rows);
+  const loginSeconds = calculateLoginSeconds(rows);
+  return percentResult(loginSeconds > 0 ? activeSeconds / loginSeconds : 0, rows.length);
+}
+
 function calculateCallsPerHourValue(rows: StoredMetricRow[]) {
   const answered = sumValues(rows, "_answered");
   const loginHours = calculateLoginSeconds(rows) / 3600;
@@ -726,7 +976,7 @@ function calculateCallsPerHourValue(rows: StoredMetricRow[]) {
   return loginHours > 0 ? answered / loginHours : 0;
 }
 
-function calculateAhtValue(rows: StoredMetricRow[]) {
+export function calculateAhtValue(rows: StoredMetricRow[]) {
   const weightedCallAht = weightedAverage(
     rows
       .filter((row) => row.metric_type === "call")
