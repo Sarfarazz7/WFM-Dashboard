@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { supabaseServer } from "@/lib/supabaseClient";
 import {
   cachedJson,
-  errorJson,
   requireDashboardAuth,
 } from "@/lib/api/dashboardApi";
 
@@ -16,10 +15,14 @@ export async function GET(request: NextRequest) {
       .select("dg_code, display_name")
       .order("display_name");
 
-    if (error) return errorJson(error);
+    if (error) {
+      console.warn("[agent-names] Failed to query agent_names table:", error.message);
+      return cachedJson([], {}, 120);
+    }
 
     return cachedJson(data ?? [], {}, 120);
   } catch (err) {
-    return errorJson(err);
+    console.warn("[agent-names] Unexpected error fetching agent names:", err);
+    return cachedJson([], {}, 120);
   }
 }
