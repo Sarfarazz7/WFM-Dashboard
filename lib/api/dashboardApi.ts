@@ -90,6 +90,27 @@ export function paginationMeta(total: number, query: DashboardQuery) {
 }
 
 /**
+ * When no explicit date filter is supplied, default to the latest date
+ * available in excel_rows so the UI always shows *some* data.
+ */
+export async function applyDefaultDates(query: DashboardQuery): Promise<DashboardQuery> {
+  if (!query.dateFrom && !query.dateTo) {
+    const { data, error } = await supabaseServer
+      .from("excel_rows")
+      .select("date")
+      .order("date", { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!error && data?.date) {
+      query.dateFrom = data.date;
+      query.dateTo = data.date;
+    }
+  }
+  return query;
+}
+
+/**
  * Convert a DashboardQuery to CalculationFilters for the business calculation engine.
  */
 export function toCalculationFilters(query: DashboardQuery): DashboardFilters {

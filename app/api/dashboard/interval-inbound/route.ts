@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { calculateIntervalInboundStatus } from "@/lib/services";
 import {
+  applyDefaultDates,
   cachedJson,
   errorJson,
   parseDashboardQuery,
@@ -14,6 +15,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const query = parseDashboardQuery(request);
+    await applyDefaultDates(query);
     const filters = toCalculationFilters(query);
     const result = await calculateIntervalInboundStatus(filters);
 

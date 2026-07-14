@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { calculateHubSubqueueIntervalStatus } from "@/lib/services";
 import {
+  applyDefaultDates,
   cachedJson,
   errorJson,
   parseDashboardQuery,
@@ -17,6 +18,7 @@ export async function GET(request: NextRequest) {
     const validSubqueue: "IB" | "DE" = subqueue === "DE" ? "DE" : "IB";
 
     const query = parseDashboardQuery(request);
+    await applyDefaultDates(query);
     const filters = toCalculationFilters(query);
     const result = await calculateHubSubqueueIntervalStatus(validSubqueue, filters);
 

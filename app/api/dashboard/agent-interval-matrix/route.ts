@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { calculateAgentIntervalMatrix, type AgentIntervalMetric } from "@/lib/services";
 import { fetchAgentNameMap, resolveName } from "@/lib/services/agentNameResolver";
 import {
+  applyDefaultDates,
   cachedJson,
   errorJson,
   parseDashboardQuery,
@@ -17,6 +18,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const query = parseDashboardQuery(request);
+    await applyDefaultDates(query);
     const metricParam = request.nextUrl.searchParams.get("metric") || "InbAHT";
     const metric = metricParam as AgentIntervalMetric;
 

@@ -344,7 +344,7 @@ export function processIntervalInboundRows(
     const inbReceived = numberFrom(row.data._inb_received);
     const inbAnswered = numberFrom(row.data._inb_answered);
     const inbAbandoned = numberFrom(row.data._inb_abandoned);
-    const ahtWithoutAcw = numberFrom(row.data._aht_without_acw) ?? numberFrom(row.data._aht);
+    const ahtWithoutAcw = numberFrom(row.data._inb_aht_without_acw) ?? numberFrom(row.data._aht);
     const hubSubqueue = row.data._hub_subqueue;
 
     if (!grouped.has(hour)) {
@@ -508,7 +508,7 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
       const inbReceived = numberFrom(row.data._inb_received);
       const inbAnswered = numberFrom(row.data._inb_answered);
       const inbAbandoned = numberFrom(row.data._inb_abandoned);
-      const ahtWithoutAcw = numberFrom(row.data._aht_without_acw) ?? numberFrom(row.data._aht);
+      const ahtWithoutAcw = numberFrom(row.data._inb_aht_without_acw) ?? numberFrom(row.data._aht);
       const hubSubqueue = row.data._hub_subqueue;
 
       if (!grouped.has(hour)) {

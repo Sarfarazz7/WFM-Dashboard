@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { calculateAgentHourlyAHT } from "@/lib/services";
 import { fetchAgentNameMap, resolveName } from "@/lib/services/agentNameResolver";
 import {
+  applyDefaultDates,
   cachedJson,
   errorJson,
   parseDashboardQuery,
@@ -15,6 +16,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const query = parseDashboardQuery(request);
+    await applyDefaultDates(query);
     const filters = toCalculationFilters(query);
     const [cells, nameMap] = await Promise.all([
       calculateAgentHourlyAHT(filters),

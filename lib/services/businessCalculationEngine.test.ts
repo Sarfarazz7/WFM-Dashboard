@@ -105,10 +105,10 @@ describe("calculateUtilizationFromRows", () => {
 describe("processHubSubqueueRows", () => {
   it("returns only rows matching the specified subqueue", () => {
     const rows = [
-      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
-      { data: { _hub_subqueue: "IB", _hub_received: 3, _hub_answered: 3, _hub_abandoned: 0, _hub_aht_without_acw: 100 }, occurred_at: "2025-07-14T10:30:00.000Z" },
-      { data: { _hub_subqueue: "DE", _hub_received: 2, _hub_answered: 2, _hub_abandoned: 0, _hub_aht_without_acw: 90 }, occurred_at: "2025-07-14T10:15:00.000Z" },
-      { data: { _hub_subqueue: "DE", _hub_received: 4, _hub_answered: 3, _hub_abandoned: 1, _hub_aht_without_acw: 110 }, occurred_at: "2025-07-14T11:00:00.000Z" },
+      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_inb_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _hub_subqueue: "IB", _hub_received: 3, _hub_answered: 3, _hub_abandoned: 0, _hub_inb_aht_without_acw: 100 }, occurred_at: "2025-07-14T10:30:00.000Z" },
+      { data: { _hub_subqueue: "DE", _hub_received: 2, _hub_answered: 2, _hub_abandoned: 0, _hub_inb_aht_without_acw: 90 }, occurred_at: "2025-07-14T10:15:00.000Z" },
+      { data: { _hub_subqueue: "DE", _hub_received: 4, _hub_answered: 3, _hub_abandoned: 1, _hub_inb_aht_without_acw: 110 }, occurred_at: "2025-07-14T11:00:00.000Z" },
     ];
 
     const result = processHubSubqueueRows(rows, "IB");
@@ -123,8 +123,8 @@ describe("processHubSubqueueRows", () => {
 
   it("excludes rows from other subqueues (filter leak test)", () => {
     const rows = [
-      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
-      { data: { _hub_subqueue: "DE", _hub_received: 10, _hub_answered: 9, _hub_abandoned: 1, _hub_aht_without_acw: 90 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_inb_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _hub_subqueue: "DE", _hub_received: 10, _hub_answered: 9, _hub_abandoned: 1, _hub_inb_aht_without_acw: 90 }, occurred_at: "2025-07-14T10:00:00.000Z" },
     ];
 
     const ibResult = processHubSubqueueRows(rows, "IB");
@@ -157,11 +157,11 @@ describe("processHubSubqueueRows", () => {
 describe("processIntervalInboundRows", () => {
   it("buckets calls into correct hourly intervals", () => {
     const inboundRows = [
-      { data: { _inb_received: 10, _inb_answered: 8, _inb_abandoned: 2, _aht_without_acw: 120, _hub_subqueue: "IB" }, occurred_at: "2025-07-14T09:15:00.000Z" },
-      { data: { _inb_received: 12, _inb_answered: 10, _inb_abandoned: 2, _aht_without_acw: 100, _hub_subqueue: null }, occurred_at: "2025-07-14T09:45:00.000Z" },
-      { data: { _inb_received: 8, _inb_answered: 7, _inb_abandoned: 1, _aht_without_acw: 110, _hub_subqueue: "DE" }, occurred_at: "2025-07-14T10:00:00.000Z" },
-      { data: { _inb_received: 15, _inb_answered: 14, _inb_abandoned: 1, _aht_without_acw: 90, _hub_subqueue: null }, occurred_at: "2025-07-14T10:30:00.000Z" },
-      { data: { _inb_received: 6, _inb_answered: 5, _inb_abandoned: 1, _aht_without_acw: 130, _hub_subqueue: null }, occurred_at: "2025-07-14T11:00:00.000Z" },
+      { data: { _inb_received: 10, _inb_answered: 8, _inb_abandoned: 2, _inb_aht_without_acw: 120, _hub_subqueue: "IB" }, occurred_at: "2025-07-14T09:15:00.000Z" },
+      { data: { _inb_received: 12, _inb_answered: 10, _inb_abandoned: 2, _inb_aht_without_acw: 100, _hub_subqueue: null }, occurred_at: "2025-07-14T09:45:00.000Z" },
+      { data: { _inb_received: 8, _inb_answered: 7, _inb_abandoned: 1, _inb_aht_without_acw: 110, _hub_subqueue: "DE" }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _inb_received: 15, _inb_answered: 14, _inb_abandoned: 1, _inb_aht_without_acw: 90, _hub_subqueue: null }, occurred_at: "2025-07-14T10:30:00.000Z" },
+      { data: { _inb_received: 6, _inb_answered: 5, _inb_abandoned: 1, _inb_aht_without_acw: 130, _hub_subqueue: null }, occurred_at: "2025-07-14T11:00:00.000Z" },
     ];
 
     const result = processIntervalInboundRows(inboundRows, []);
@@ -181,8 +181,8 @@ describe("processIntervalInboundRows", () => {
 
   it("places a call at exactly XX:00:00 in the correct hour", () => {
     const inboundRows = [
-      { data: { _inb_received: 5, _inb_answered: 5, _inb_abandoned: 0, _aht_without_acw: 100 }, occurred_at: "2025-07-14T10:00:00.000Z" },
-      { data: { _inb_received: 3, _inb_answered: 3, _inb_abandoned: 0, _aht_without_acw: 90 }, occurred_at: "2025-07-14T10:59:59.000Z" },
+      { data: { _inb_received: 5, _inb_answered: 5, _inb_abandoned: 0, _inb_aht_without_acw: 100 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _inb_received: 3, _inb_answered: 3, _inb_abandoned: 0, _inb_aht_without_acw: 90 }, occurred_at: "2025-07-14T10:59:59.000Z" },
     ];
 
     const result = processIntervalInboundRows(inboundRows, []);
@@ -193,7 +193,7 @@ describe("processIntervalInboundRows", () => {
 
   it("merges outbound data into inbound buckets", () => {
     const inboundRows = [
-      { data: { _inb_received: 10, _inb_answered: 8, _inb_abandoned: 2, _aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _inb_received: 10, _inb_answered: 8, _inb_abandoned: 2, _inb_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
     ];
     const outboundRows = [
       { data: { _is_outbound_dialled: 5, _is_outbound_connected: 4 }, occurred_at: "2025-07-14T10:30:00.000Z" },
@@ -216,8 +216,8 @@ describe("processIntervalInboundRows", () => {
 
   it("computes weighted average AHT correctly", () => {
     const inboundRows = [
-      { data: { _inb_received: 10, _inb_answered: 10, _inb_abandoned: 0, _aht_without_acw: 100 }, occurred_at: "2025-07-14T10:00:00.000Z" },
-      { data: { _inb_received: 5, _inb_answered: 5, _inb_abandoned: 0, _aht_without_acw: 200 }, occurred_at: "2025-07-14T10:30:00.000Z" },
+      { data: { _inb_received: 10, _inb_answered: 10, _inb_abandoned: 0, _inb_aht_without_acw: 100 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _inb_received: 5, _inb_answered: 5, _inb_abandoned: 0, _inb_aht_without_acw: 200 }, occurred_at: "2025-07-14T10:30:00.000Z" },
     ];
 
     const result = processIntervalInboundRows(inboundRows, []);
@@ -227,9 +227,9 @@ describe("processIntervalInboundRows", () => {
 
   it("counts hub IB and DE subqueues correctly", () => {
     const inboundRows = [
-      { data: { _inb_received: 5, _inb_answered: 5, _inb_abandoned: 0, _aht_without_acw: 100, _hub_subqueue: "IB" }, occurred_at: "2025-07-14T10:00:00.000Z" },
-      { data: { _inb_received: 3, _inb_answered: 3, _inb_abandoned: 0, _aht_without_acw: 90, _hub_subqueue: "DE" }, occurred_at: "2025-07-14T10:00:00.000Z" },
-      { data: { _inb_received: 4, _inb_answered: 4, _inb_abandoned: 0, _aht_without_acw: 110, _hub_subqueue: null }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _inb_received: 5, _inb_answered: 5, _inb_abandoned: 0, _inb_aht_without_acw: 100, _hub_subqueue: "IB" }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _inb_received: 3, _inb_answered: 3, _inb_abandoned: 0, _inb_aht_without_acw: 90, _hub_subqueue: "DE" }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _inb_received: 4, _inb_answered: 4, _inb_abandoned: 0, _inb_aht_without_acw: 110, _hub_subqueue: null }, occurred_at: "2025-07-14T10:00:00.000Z" },
     ];
 
     const result = processIntervalInboundRows(inboundRows, []);
