@@ -93,6 +93,14 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
   const [data, setData] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [agentNames, setAgentNames] = useState<Array<{ dg_code: string; display_name: string }>>([]);
+
+  useEffect(() => {
+    fetch("/api/dashboard/agent-names")
+      .then((res) => res.json())
+      .then((json) => setAgentNames(Array.isArray(json) ? json : []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -142,7 +150,7 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
 
   if (kind === "settings") {
     return (
-      <PageFrame title={title} description={description} filters={filters} setFilters={setFilters}>
+      <PageFrame title={title} description={description} filters={filters} setFilters={setFilters} agentNames={agentNames}>
         <StatusMessage loading={loading} error={error} />
         <KpiGrid summary={summary} loading={loading} />
         <Section title="API and data status">
@@ -162,7 +170,7 @@ export default function EnterpriseDashboardPage({ kind, title, description }: Pr
   }
 
   return (
-    <PageFrame title={title} description={description} filters={filters} setFilters={setFilters}>
+    <PageFrame title={title} description={description} filters={filters} setFilters={setFilters} agentNames={agentNames}>
       <StatusMessage loading={loading} error={error} />
       <KpiGrid summary={summary} loading={loading} />
 
@@ -302,18 +310,20 @@ function PageFrame({
   description,
   filters,
   setFilters,
+  agentNames,
   children,
 }: {
   title: string;
   description: string;
   filters: Filters;
   setFilters: (filters: Filters) => void;
+  agentNames: Array<{ dg_code: string; display_name: string }>;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-5">
       <PageHeading title={title} description={description} />
-      <FilterBar filters={filters} setFilters={setFilters} />
+      <FilterBar filters={filters} setFilters={setFilters} agentNames={agentNames} />
       {children}
     </div>
   );
@@ -330,7 +340,15 @@ function PageHeading({ title, description }: { title: string; description: strin
   );
 }
 
-function FilterBar({ filters, setFilters }: { filters: Filters; setFilters: (filters: Filters) => void }) {
+function FilterBar({
+  filters,
+  setFilters,
+  agentNames,
+}: {
+  filters: Filters;
+  setFilters: (filters: Filters) => void;
+  agentNames: Array<{ dg_code: string; display_name: string }>;
+}) {
   return (
     <div className="grid gap-3 border border-ink-600/60 bg-ink-900 p-4 sm:grid-cols-2 lg:grid-cols-6">
       <Field label="From" type="date" value={filters.dateFrom} onChange={(dateFrom) => setFilters({ ...filters, dateFrom })} />
@@ -338,7 +356,21 @@ function FilterBar({ filters, setFilters }: { filters: Filters; setFilters: (fil
       <Field label="Time From" type="time" value={filters.timeFrom} onChange={(timeFrom) => setFilters({ ...filters, timeFrom })} />
       <Field label="Time To" type="time" value={filters.timeTo} onChange={(timeTo) => setFilters({ ...filters, timeTo })} />
       <Field label="LOB" value={filters.lob} placeholder="All teams" onChange={(lob) => setFilters({ ...filters, lob })} />
-      <Field label="Agent" value={filters.agent} placeholder="All agents" onChange={(agent) => setFilters({ ...filters, agent })} />
+      <label>
+        <span className="label-eyebrow mb-1 block">Agent</span>
+        <select
+          className="input w-full"
+          value={filters.agent}
+          onChange={(e) => setFilters({ ...filters, agent: e.target.value })}
+        >
+          <option value="">All agents</option>
+          {agentNames.map((a) => (
+            <option key={a.dg_code} value={a.dg_code}>
+              {a.display_name}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }

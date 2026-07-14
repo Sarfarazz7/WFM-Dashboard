@@ -1,6 +1,7 @@
 import { supabaseServer } from "@/lib/supabaseClient";
 import { extractWorkbook } from "./extract";
 import { parseWorkbookSheets } from "./parse";
+import { upsertAgentNamesFromWorkbook } from "./agentNamesUpsert";
 import { transformWorkbookRows } from "./transform";
 import { validateWorkbookRows } from "./validate";
 import { loadWorkbookRows } from "./load";
@@ -115,6 +116,16 @@ export async function runWorkbookUploadPipeline(params: {
         details: {
           rowCount: result.rows.length,
           sheetsFound: result.sheetsFound,
+        },
+      };
+    });
+
+    await runStage(upload.id, "parse", "Parse agent name mappings", async () => {
+      const result = await upsertAgentNamesFromWorkbook(extracted.workbook);
+      return {
+        details: {
+          upsertedCount: result.upsertedCount,
+          deletedCount: result.deletedCount,
         },
       };
     });

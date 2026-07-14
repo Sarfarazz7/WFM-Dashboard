@@ -233,6 +233,16 @@ create index if not exists idx_agent_day_summary_lob_date on agent_day_summary (
 create index if not exists idx_agent_day_summary_agent_name on agent_day_summary (agent_name);
 
 -- ---------------------------------------------------------------------
+-- 3b. agent_names: maps DG-codes to human-readable display names.
+--     Populated from the workbook's "Data Sheet" tab during ETL.
+-- ---------------------------------------------------------------------
+create table if not exists agent_names (
+  dg_code   text primary key,
+  display_name text not null,
+  updated_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------------
 -- 4. Storage bucket for the raw uploaded Excel files (kept for audit /
 --    re-processing, not read on every dashboard request).
 --    NOTE: buckets can also be created in the Storage tab of the
@@ -263,6 +273,7 @@ alter table staging_records enable row level security;
 alter table validation_events enable row level security;
 alter table daily_summary enable row level security;
 alter table agent_day_summary enable row level security;
+alter table agent_names enable row level security;
 
 -- No policies are created for the anon role, which means: with RLS on
 -- and zero policies, ALL access from the anon/public key is denied.
