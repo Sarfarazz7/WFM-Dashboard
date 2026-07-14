@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { WfmDataTable } from "@/components/WfmDataTable";
 import { WfmFilterBar, type WfmFilters } from "@/components/WfmFilterBar";
 import { DetailSection, DetailRow } from "@/components/SideDrawer";
+import { DeltaIndicator } from "@/components/DeltaIndicator";
+import { type MetricType } from "@/lib/utils/conditionalFormat";
 
 interface IntervalInboundRow {
   hour: number;
@@ -32,6 +34,26 @@ function formatInterval(hour: number): string {
   return `${display}${ampm}`;
 }
 
+function buildHourMap(data: IntervalInboundResponse | null): Map<number, IntervalInboundRow> {
+  const map = new Map<number, IntervalInboundRow>();
+  if (!data) return map;
+  for (const row of data.rows) map.set(row.hour, row);
+  return map;
+}
+
+function makeParams(filters: WfmFilters, dateFrom: string, dateTo: string) {
+  const p = new URLSearchParams();
+  if (dateFrom) p.set("dateFrom", dateFrom);
+  if (dateTo) p.set("dateTo", dateTo);
+  if (filters.timeFrom) p.set("timeFrom", filters.timeFrom);
+  if (filters.timeTo) p.set("timeTo", filters.timeTo);
+  if (filters.lob) p.set("lob", filters.lob);
+  if (filters.agent) p.set("agent", filters.agent);
+  return p;
+}
+
+const AHT_METRIC: MetricType = "AHT";
+
 export default function IntervalInboundStatusPage() {
   const [filters, setFilters] = useState<WfmFilters>({
     dateFrom: new Date().toISOString().split("T")[0],
@@ -42,34 +64,66 @@ export default function IntervalInboundStatusPage() {
     agent: "",
   });
   const [data, setData] = useState<IntervalInboundResponse | null>(null);
+  const [yesterdayData, setYesterdayData] = useState<IntervalInboundResponse | null>(null);
+  const [lastWeekData, setLastWeekData] = useState<IntervalInboundResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams();
-        if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
-        if (filters.dateTo) params.set("dateTo", filters.dateTo);
-        if (filters.timeFrom) params.set("timeFrom", filters.timeFrom);
-        if (filters.timeTo) params.set("timeTo", filters.timeTo);
-        if (filters.lob) params.set("lob", filters.lob);
-        if (filters.agent) params.set("agent", filters.agent);
-
-        const res = await fetch(`/api/dashboard/interval-inbound?${params}`);
-        if (!res.ok) throw new Error(`Failed (${res.status})`);
-        setData(await res.json());
-      } catch (e: any) {
-        setError(e.message);
-        setData(null);
-      } finally {
-        setLoading(false);
-      }
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = makeParams(filters, filters.dateFrom, filters.dateTo);
+      const res = await fetch(`/api/dashboard/interval-inbound?${params}`);
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      setData(await res.json());
+    } catch (e: any) {
+      setError(e.message);
+      setData(null);
+    } finally {
+      setLoading(false);
     }
-    loadData();
   }, [filters]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (!filters.dateFrom) return;
+    const yFrom = new Date(filters.dateFrom);
+    yFrom.setDate(yFrom.getDate() - 1);
+    const yTo = filters.dateTo ? new Date(filters.dateTo) : yFrom;
+    yTo.setDate(yTo.getDate() - 1);
+    const lwFrom = new Date(filters.dateFrom);
+    lwFrom.setDate(lwFrom.getDate() - 7);
+    const lwTo = filters.dateTo ? new Date(filters.dateTo) : lwFrom;
+    lwTo.setDate(lwTo.getDate() - 7);
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+
+    Promise.all([
+      fetch(`/api/dashboard/interval-inbound?${makeParams(filters, fmt(yFrom), fmt(yTo))}`).then((r) => r.ok ? r.json() : null),
+      fetch(`/api/dashboard/interval-inbound?${makeParams(filters, fmt(lwFrom), fmt(lwTo))}`).then((r) => r.ok ? r.json() : null),
+    ]).then(([y, lw]) => {
+      setYesterdayData(y);
+      setLastWeekData(lw);
+    }).catch(() => {});
+  }, [filters]);
+
+  const yMap = useMemo(() => buildHourMap(yesterdayData), [yesterdayData]);
+  const lwMap = useMemo(() => buildHourMap(lastWeekData), [lastWeekData]);
+
+  function cellWithDelta(val: number, hour: number, metricType: MetricType, format?: (v: number) => string) {
+    const yVal = yMap.get(hour)?.[metricType === "AHT" ? "avgAht" : "received" as keyof IntervalInboundRow] as number | undefined;
+    const lwVal = lwMap.get(hour)?.[metricType === "AHT" ? "avgAht" : "received" as keyof IntervalInboundRow] as number | undefined;
+    return (
+      <div className="flex flex-col">
+        <span>{format ? format(val) : val}</span>
+        <div className="flex gap-1">
+          {yVal !== undefined && <DeltaIndicator current={val} previous={yVal} metricType={metricType} />}
+          {lwVal !== undefined && <DeltaIndicator current={val} previous={lwVal} metricType={metricType} />}
+        </div>
+      </div>
+    );
+  }
 
   const columns = useMemo<ColumnDef<IntervalInboundRow, any>[]>(() => [
     {
@@ -87,25 +141,62 @@ export default function IntervalInboundStatusPage() {
       id: "received",
       header: "Received",
       accessorKey: "received",
-      size: 80,
+      size: 90,
+      cell: (info) => {
+        const val = info.getValue() as number;
+        const hour = info.row.original.hour;
+        const yVal = yMap.get(hour)?.received;
+        const lwVal = lwMap.get(hour)?.received;
+        return (
+          <div className="flex flex-col">
+            <span>{val}</span>
+            <div className="flex gap-1">
+              {yVal !== undefined && <DeltaIndicator current={val} previous={yVal} metricType="SLA" />}
+              {lwVal !== undefined && <DeltaIndicator current={val} previous={lwVal} metricType="SLA" />}
+            </div>
+          </div>
+        );
+      },
     },
     {
       id: "answered",
       header: "Answered",
       accessorKey: "answered",
-      size: 80,
+      size: 90,
+      cell: (info) => {
+        const val = info.getValue() as number;
+        const hour = info.row.original.hour;
+        const yVal = yMap.get(hour)?.answered;
+        const lwVal = lwMap.get(hour)?.answered;
+        return (
+          <div className="flex flex-col">
+            <span>{val}</span>
+            <div className="flex gap-1">
+              {yVal !== undefined && <DeltaIndicator current={val} previous={yVal} metricType="SLA" />}
+              {lwVal !== undefined && <DeltaIndicator current={val} previous={lwVal} metricType="SLA" />}
+            </div>
+          </div>
+        );
+      },
     },
     {
       id: "abandoned",
       header: "Abandoned",
       accessorKey: "abandoned",
-      size: 80,
+      size: 90,
       cell: (info) => {
         const val = info.getValue() as number;
+        const hour = info.row.original.hour;
+        const yVal = yMap.get(hour)?.abandoned;
+        const lwVal = lwMap.get(hour)?.abandoned;
         return (
-          <span className={val > 0 ? "text-rose-400" : "text-mist-400"}>
-            {val}
-          </span>
+          <div className="flex flex-col">
+            <span className={val > 0 ? "text-rose-400" : "text-mist-400"}>{val}</span>
+            <div className="flex gap-1">
+              {yVal !== undefined && <DeltaIndicator current={val} previous={yVal} metricType="Abandonment" />}
+              {lwVal !== undefined && <DeltaIndicator current={val} previous={lwVal} metricType="Abandonment" />}
+            </div>
+          </div>
         );
       },
     },
@@ -113,11 +204,22 @@ export default function IntervalInboundStatusPage() {
       id: "avgAht",
       header: "Avg AHT",
       accessorKey: "avgAht",
-      size: 80,
+      size: 90,
       cell: (info) => {
         const val = info.getValue() as number;
+        const hour = info.row.original.hour;
         const cls = val <= 120 ? "text-emerald-400" : val <= 180 ? "text-amber-400" : "text-rose-400";
-        return <span className={cls}>{val > 0 ? `${Math.round(val)}s` : "-"}</span>;
+        const yVal = yMap.get(hour)?.avgAht;
+        const lwVal = lwMap.get(hour)?.avgAht;
+        return (
+          <div className="flex flex-col">
+            <span className={cls}>{val > 0 ? `${Math.round(val)}s` : "-"}</span>
+            <div className="flex gap-1">
+              {yVal !== undefined && val > 0 && <DeltaIndicator current={val} previous={yVal} metricType="AHT" />}
+              {lwVal !== undefined && val > 0 && <DeltaIndicator current={val} previous={lwVal} metricType="AHT" />}
+            </div>
+          </div>
+        );
       },
     },
     {
@@ -148,21 +250,29 @@ export default function IntervalInboundStatusPage() {
       id: "connectedPct",
       header: "Connected %",
       accessorKey: "connectedPct",
-      size: 90,
+      size: 100,
       cell: (info) => {
         const val = info.getValue() as number;
+        const hour = info.row.original.hour;
         const cls = val >= 80 ? "text-emerald-400" : val >= 70 ? "text-amber-400" : "text-rose-400";
-        return <span className={cls}>{val > 0 ? `${val.toFixed(1)}%` : "-"}</span>;
+        const yVal = yMap.get(hour)?.connectedPct;
+        const lwVal = lwMap.get(hour)?.connectedPct;
+        return (
+          <div className="flex flex-col">
+            <span className={cls}>{val > 0 ? `${val.toFixed(1)}%` : "-"}</span>
+            <div className="flex gap-1">
+              {yVal !== undefined && <DeltaIndicator current={val} previous={yVal} metricType="SLA" />}
+              {lwVal !== undefined && <DeltaIndicator current={val} previous={lwVal} metricType="SLA" />}
+            </div>
+          </div>
+        );
       },
     },
-  ], []);
+  ], [yMap, lwMap]);
 
   const totalRow = useMemo(() => {
     if (!data?.totals) return undefined;
-    return {
-      hour: -1,
-      ...data.totals,
-    };
+    return { hour: -1, ...data.totals };
   }, [data]);
 
   return (
@@ -172,6 +282,15 @@ export default function IntervalInboundStatusPage() {
         <p className="mt-1 text-sm text-mist-400">
           Hourly inbound call volume, AHT, abandonment, and outbound performance.
         </p>
+      </div>
+
+      <div className="flex items-center gap-4 text-xs text-mist-400">
+        <div className="flex items-center gap-1">
+          <span className="text-emerald-400">↑</span> Improved vs comparison period
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-rose-400">↑</span> Degraded vs comparison period
+        </div>
       </div>
 
       <WfmFilterBar
@@ -190,7 +309,6 @@ export default function IntervalInboundStatusPage() {
         title="Inbound Status by Hour"
         stickyFirstColumn
         enableRowVirtualization={false}
-        onCellClick={(row, col) => {}}
         exportFilename={`interval_inbound_${filters.dateFrom}_${filters.dateTo}`}
         totalRow={totalRow}
         drawerContent={(row, columnId) => (

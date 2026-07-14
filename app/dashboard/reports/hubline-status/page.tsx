@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { WfmDataTable } from "@/components/WfmDataTable";
 import { WfmFilterBar, type WfmFilters } from "@/components/WfmFilterBar";
 import { DetailSection, DetailRow } from "@/components/SideDrawer";
+import { DeltaIndicator } from "@/components/DeltaIndicator";
 
 interface IntervalRow {
   hour: number;
@@ -32,6 +33,24 @@ function formatInterval(hour: number): string {
   return `${display}${ampm}`;
 }
 
+function buildHourMap(data: IntervalResponse | null): Map<number, IntervalRow> {
+  const map = new Map<number, IntervalRow>();
+  if (!data) return map;
+  for (const row of data.rows) map.set(row.hour, row);
+  return map;
+}
+
+function makeHubParams(filters: WfmFilters, subqueue: string, dateFrom: string, dateTo: string) {
+  const p = new URLSearchParams({ subqueue });
+  if (dateFrom) p.set("dateFrom", dateFrom);
+  if (dateTo) p.set("dateTo", dateTo);
+  if (filters.timeFrom) p.set("timeFrom", filters.timeFrom);
+  if (filters.timeTo) p.set("timeTo", filters.timeTo);
+  if (filters.lob) p.set("lob", filters.lob);
+  if (filters.agent) p.set("agent", filters.agent);
+  return p;
+}
+
 export default function HublineStatusPage() {
   const [subqueue, setSubqueue] = useState<"IB" | "DE">("IB");
   const [filters, setFilters] = useState<WfmFilters>({
@@ -43,34 +62,66 @@ export default function HublineStatusPage() {
     agent: "",
   });
   const [data, setData] = useState<IntervalResponse | null>(null);
+  const [yesterdayData, setYesterdayData] = useState<IntervalResponse | null>(null);
+  const [lastWeekData, setLastWeekData] = useState<IntervalResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams({ subqueue });
-        if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
-        if (filters.dateTo) params.set("dateTo", filters.dateTo);
-        if (filters.timeFrom) params.set("timeFrom", filters.timeFrom);
-        if (filters.timeTo) params.set("timeTo", filters.timeTo);
-        if (filters.lob) params.set("lob", filters.lob);
-        if (filters.agent) params.set("agent", filters.agent);
-
-        const res = await fetch(`/api/dashboard/hub-subqueue-interval?${params}`);
-        if (!res.ok) throw new Error(`Failed (${res.status})`);
-        setData(await res.json());
-      } catch (e: any) {
-        setError(e.message);
-        setData(null);
-      } finally {
-        setLoading(false);
-      }
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = makeHubParams(filters, subqueue, filters.dateFrom, filters.dateTo);
+      const res = await fetch(`/api/dashboard/hub-subqueue-interval?${params}`);
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      setData(await res.json());
+    } catch (e: any) {
+      setError(e.message);
+      setData(null);
+    } finally {
+      setLoading(false);
     }
-    loadData();
   }, [subqueue, filters]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    if (!filters.dateFrom) return;
+    const yFrom = new Date(filters.dateFrom);
+    yFrom.setDate(yFrom.getDate() - 1);
+    const yTo = filters.dateTo ? new Date(filters.dateTo) : yFrom;
+    yTo.setDate(yTo.getDate() - 1);
+    const lwFrom = new Date(filters.dateFrom);
+    lwFrom.setDate(lwFrom.getDate() - 7);
+    const lwTo = filters.dateTo ? new Date(filters.dateTo) : lwFrom;
+    lwTo.setDate(lwTo.getDate() - 7);
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+
+    Promise.all([
+      fetch(`/api/dashboard/hub-subqueue-interval?${makeHubParams(filters, subqueue, fmt(yFrom), fmt(yTo))}`).then((r) => r.ok ? r.json() : null),
+      fetch(`/api/dashboard/hub-subqueue-interval?${makeHubParams(filters, subqueue, fmt(lwFrom), fmt(lwTo))}`).then((r) => r.ok ? r.json() : null),
+    ]).then(([y, lw]) => {
+      setYesterdayData(y);
+      setLastWeekData(lw);
+    }).catch(() => {});
+  }, [subqueue, filters]);
+
+  const yMap = useMemo(() => buildHourMap(yesterdayData), [yesterdayData]);
+  const lwMap = useMemo(() => buildHourMap(lastWeekData), [lastWeekData]);
+
+  function deltaCell(val: number, hour: number, key: keyof IntervalRow, metricType: "AHT" | "Hold" | "SLA" | "Abandonment") {
+    const yVal = yMap.get(hour)?.[key] as number | undefined;
+    const lwVal = lwMap.get(hour)?.[key] as number | undefined;
+    return (
+      <div className="flex flex-col">
+        <span>{metricType === "AHT" ? (val > 0 ? `${Math.round(val)}s` : "-") : val}</span>
+        <div className="flex gap-1">
+          {yVal !== undefined && <DeltaIndicator current={val} previous={yVal} metricType={metricType} />}
+          {lwVal !== undefined && <DeltaIndicator current={val} previous={lwVal} metricType={metricType} />}
+        </div>
+      </div>
+    );
+  }
 
   const columns = useMemo<ColumnDef<IntervalRow, any>[]>(() => [
     {
@@ -88,25 +139,62 @@ export default function HublineStatusPage() {
       id: "received",
       header: "Received",
       accessorKey: "received",
-      size: 80,
+      size: 90,
+      cell: (info) => {
+        const val = info.getValue() as number;
+        const hour = info.row.original.hour;
+        const yVal = yMap.get(hour)?.received;
+        const lwVal = lwMap.get(hour)?.received;
+        return (
+          <div className="flex flex-col">
+            <span>{val}</span>
+            <div className="flex gap-1">
+              {yVal !== undefined && <DeltaIndicator current={val} previous={yVal} metricType="SLA" />}
+              {lwVal !== undefined && <DeltaIndicator current={val} previous={lwVal} metricType="SLA" />}
+            </div>
+          </div>
+        );
+      },
     },
     {
       id: "answered",
       header: "Answered",
       accessorKey: "answered",
-      size: 80,
+      size: 90,
+      cell: (info) => {
+        const val = info.getValue() as number;
+        const hour = info.row.original.hour;
+        const yVal = yMap.get(hour)?.answered;
+        const lwVal = lwMap.get(hour)?.answered;
+        return (
+          <div className="flex flex-col">
+            <span>{val}</span>
+            <div className="flex gap-1">
+              {yVal !== undefined && <DeltaIndicator current={val} previous={yVal} metricType="SLA" />}
+              {lwVal !== undefined && <DeltaIndicator current={val} previous={lwVal} metricType="SLA" />}
+            </div>
+          </div>
+        );
+      },
     },
     {
       id: "abandoned",
       header: "Abandoned",
       accessorKey: "abandoned",
-      size: 80,
+      size: 90,
       cell: (info) => {
         const val = info.getValue() as number;
+        const hour = info.row.original.hour;
+        const yVal = yMap.get(hour)?.abandoned;
+        const lwVal = lwMap.get(hour)?.abandoned;
         return (
-          <span className={val > 0 ? "text-rose-400" : "text-mist-400"}>
-            {val}
-          </span>
+          <div className="flex flex-col">
+            <span className={val > 0 ? "text-rose-400" : "text-mist-400"}>{val}</span>
+            <div className="flex gap-1">
+              {yVal !== undefined && <DeltaIndicator current={val} previous={yVal} metricType="Abandonment" />}
+              {lwVal !== undefined && <DeltaIndicator current={val} previous={lwVal} metricType="Abandonment" />}
+            </div>
+          </div>
         );
       },
     },
@@ -114,11 +202,22 @@ export default function HublineStatusPage() {
       id: "avgAht",
       header: "Avg AHT",
       accessorKey: "avgAht",
-      size: 80,
+      size: 90,
       cell: (info) => {
         const val = info.getValue() as number;
+        const hour = info.row.original.hour;
         const cls = val <= 120 ? "text-emerald-400" : val <= 180 ? "text-amber-400" : "text-rose-400";
-        return <span className={cls}>{val > 0 ? `${Math.round(val)}s` : "-"}</span>;
+        const yVal = yMap.get(hour)?.avgAht;
+        const lwVal = lwMap.get(hour)?.avgAht;
+        return (
+          <div className="flex flex-col">
+            <span className={cls}>{val > 0 ? `${Math.round(val)}s` : "-"}</span>
+            <div className="flex gap-1">
+              {yVal !== undefined && val > 0 && <DeltaIndicator current={val} previous={yVal} metricType="AHT" />}
+              {lwVal !== undefined && val > 0 && <DeltaIndicator current={val} previous={lwVal} metricType="AHT" />}
+            </div>
+          </div>
+        );
       },
     },
     {
@@ -127,14 +226,11 @@ export default function HublineStatusPage() {
       accessorKey: "callCount",
       size: 70,
     },
-  ], []);
+  ], [yMap, lwMap]);
 
   const totalRow = useMemo(() => {
     if (!data?.totals) return undefined;
-    return {
-      hour: -1,
-      ...data.totals,
-    };
+    return { hour: -1, ...data.totals };
   }, [data]);
 
   return (
@@ -144,6 +240,15 @@ export default function HublineStatusPage() {
         <p className="mt-1 text-sm text-mist-400">
           Hourly hubline performance by subqueue (IB / DE).
         </p>
+      </div>
+
+      <div className="flex items-center gap-4 text-xs text-mist-400">
+        <div className="flex items-center gap-1">
+          <span className="text-emerald-400">↑</span> Improved vs comparison period
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-rose-400">↑</span> Degraded vs comparison period
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
@@ -182,7 +287,6 @@ export default function HublineStatusPage() {
         title={`Hubline ${subqueue} Status by Hour`}
         stickyFirstColumn
         enableRowVirtualization={false}
-        onCellClick={(row, col) => {}}
         exportFilename={`hubline_${subqueue}_${filters.dateFrom}_${filters.dateTo}`}
         totalRow={totalRow}
         drawerContent={(row, columnId) => (
