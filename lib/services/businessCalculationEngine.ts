@@ -169,6 +169,24 @@ export interface AllSummaryResult {
   callsPerHour: CalculationResult;
 }
 
+export type AgentIntervalMetric = "InbAHT" | "InbHold" | "HubAHT" | "HubHold";
+
+export interface AgentIntervalCell {
+  agent: string;
+  interval: number;
+  metric: number;
+  callCount: number;
+}
+
+export interface AgentIntervalMatrixResult {
+  agents: string[];
+  intervals: number[];
+  cells: AgentIntervalCell[];
+  rowTotals: Record<string, number>;
+  columnTotals: Record<number, number>;
+  grandTotal: number;
+}
+
 export async function calculateAllSummary(filters: CalculationFilters = {}): Promise<AllSummaryResult> {
   const allRows = await fetchMetricRows(filters, ALL_METRICS);
 
@@ -845,6 +863,167 @@ export async function calculateHubSubqueueIntervalStatus(
       outboundConnected: 0,
       connectedPct: 0,
     },
+  };
+}
+
+export function calculateAverageHoldValue(rows: StoredMetricRow[]): number {
+  return weightedAverage(
+    rows
+      .filter((row) => row.metric_type === "call")
+      .map((row) => ({
+        value: numberFrom(row.data._hold),
+        weight: numberFrom(row.data._answered) || 1,
+      }))
+  );
+}
+
+export function calculateACWValue(rows: StoredMetricRow[]): number {
+  const totalAcw = rows
+    .filter((row) => row.metric_type === "call")
+    .reduce((total, row) => {
+      const acw = numberFrom(row.data._inb_acw);
+      const answered = numberFrom(row.data._answered);
+      return total + (acw * answered);
+    }, 0);
+  const totalAnswered = sumValues(rows, "_answered");
+  return totalAnswered > 0 ? totalAcw / totalAnswered : 0;
+}
+
+export function calculateHubACWValue(rows: StoredMetricRow[]): number {
+  const totalAcw = rows
+    .filter((row) => row.metric_type === "call")
+    .reduce((total, row) => {
+      const acw = numberFrom(row.data._hub_acw);
+      const hubAnswered = numberFrom(row.data._hub_answered);
+      return total + (acw * hubAnswered);
+    }, 0);
+  const totalHubAnswered = rows
+    .filter((row) => row.metric_type === "call")
+    .reduce((total, row) => total + numberFrom(row.data._hub_answered), 0);
+  return totalHubAnswered > 0 ? totalAcw / totalHubAnswered : 0;
+}
+
+export async function calculateAgentIntervalMatrix(
+  metric: AgentIntervalMetric,
+  filters: CalculationFilters = {}
+): Promise<AgentIntervalMatrixResult> {
+  const PAGE_SIZE = 1000;
+  const cells = new Map<string, { totalMetric: number; totalWeight: number; callCount: number }>();
+
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    let query = supabaseServer
+      .from("excel_rows")
+      .select("agent_name, data, occurred_at")
+      .eq("metric_type", "call")
+      .not("occurred_at", "is", null)
+      .range(offset, offset + PAGE_SIZE - 1);
+
+    if (filters.dateFrom) query = query.gte("date", filters.dateFrom);
+    if (filters.dateTo ?? filters.dateFrom) query = query.lte("date", filters.dateTo ?? filters.dateFrom!);
+    if (filters.timeFrom) query = query.filter("occurred_at::time", "gte", filters.timeFrom);
+    if (filters.timeTo) query = query.filter("occurred_at::time", "lte", filters.timeTo);
+    if (filters.lob) query = query.eq("lob", filters.lob);
+    if (filters.agentName) query = query.eq("agent_name", filters.agentName);
+
+    const { data, error } = await query;
+    if (error) throw new Error(`Agent interval matrix query failed: ${error.message}`);
+
+    for (const row of (data ?? []) as Array<{ agent_name: string | null; data: Record<string, unknown>; occurred_at: string }>) {
+      const agent = row.agent_name ?? "Unknown";
+      const hour = new Date(row.occurred_at).getUTCHours();
+
+      let metricValue = 0;
+      let weight = 0;
+
+      switch (metric) {
+        case "InbAHT":
+          metricValue = numberFrom(row.data._aht_without_acw) || numberFrom(row.data._aht);
+          weight = numberFrom(row.data._inb_answered);
+          break;
+        case "InbHold":
+          metricValue = numberFrom(row.data._inb_hold);
+          weight = numberFrom(row.data._inb_answered);
+          break;
+        case "HubAHT":
+          metricValue = numberFrom(row.data._hub_aht_without_acw) || numberFrom(row.data._aht);
+          weight = numberFrom(row.data._hub_answered);
+          break;
+        case "HubHold":
+          metricValue = numberFrom(row.data._hub_hold);
+          weight = numberFrom(row.data._hub_answered);
+          break;
+      }
+
+      if (metricValue > 0 && weight > 0) {
+        const key = `${agent}|${hour}`;
+        if (!cells.has(key)) {
+          cells.set(key, { totalMetric: 0, totalWeight: 0, callCount: 0 });
+        }
+        const cell = cells.get(key)!;
+        cell.totalMetric += metricValue * weight;
+        cell.totalWeight += weight;
+        cell.callCount++;
+      }
+    }
+
+    hasMore = (data?.length ?? 0) === PAGE_SIZE;
+    offset += PAGE_SIZE;
+  }
+
+  const agentSet = new Set<string>();
+  const intervalSet = new Set<number>();
+  const resultCells: AgentIntervalCell[] = [];
+  const rowTotals = new Map<string, { total: number; weight: number }>();
+  const columnTotals = new Map<number, { total: number; weight: number }>();
+  let grandTotal = 0;
+  let grandWeight = 0;
+
+  for (const [key, cell] of cells) {
+    const [agent, hourStr] = key.split("|");
+    const hour = Number(hourStr);
+    const avgMetric = cell.totalWeight > 0 ? round(cell.totalMetric / cell.totalWeight) : 0;
+
+    agentSet.add(agent);
+    intervalSet.add(hour);
+    resultCells.push({ agent, interval: hour, metric: avgMetric, callCount: cell.callCount });
+
+    if (!rowTotals.has(agent)) rowTotals.set(agent, { total: 0, weight: 0 });
+    const rowTotal = rowTotals.get(agent)!;
+    rowTotal.total += cell.totalMetric;
+    rowTotal.weight += cell.totalWeight;
+
+    if (!columnTotals.has(hour)) columnTotals.set(hour, { total: 0, weight: 0 });
+    const colTotal = columnTotals.get(hour)!;
+    colTotal.total += cell.totalMetric;
+    colTotal.weight += cell.totalWeight;
+
+    grandTotal += cell.totalMetric;
+    grandWeight += cell.totalWeight;
+  }
+
+  const sortedAgents = Array.from(agentSet).sort();
+  const sortedIntervals = Array.from(intervalSet).sort((a, b) => a - b);
+
+  const resultRowTotals: Record<string, number> = {};
+  for (const [agent, data] of rowTotals) {
+    resultRowTotals[agent] = data.weight > 0 ? round(data.total / data.weight) : 0;
+  }
+
+  const resultColumnTotals: Record<number, number> = {};
+  for (const [hour, data] of columnTotals) {
+    resultColumnTotals[hour] = data.weight > 0 ? round(data.total / data.weight) : 0;
+  }
+
+  return {
+    agents: sortedAgents,
+    intervals: sortedIntervals,
+    cells: resultCells,
+    rowTotals: resultRowTotals,
+    columnTotals: resultColumnTotals,
+    grandTotal: grandWeight > 0 ? round(grandTotal / grandWeight) : 0,
   };
 }
 

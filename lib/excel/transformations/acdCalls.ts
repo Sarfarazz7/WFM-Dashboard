@@ -11,27 +11,32 @@ export function transformAcdCallData(row: RawObjectRow): Record<string, unknown>
   const inbAbandoned = parseNumber(findValue(row, acdCallsMapping.columns.inbAbandoned)) ?? 0;
   const usingHub = hubReceived > 0;
 
+  const hubAht = parseNumber(findValue(row, acdCallsMapping.columns.hubAht)) ?? 0;
+  const inbAht = parseNumber(findValue(row, acdCallsMapping.columns.inbAht)) ?? 0;
+  const hubAhtWithoutAcw = parseNumber(findValue(row, acdCallsMapping.columns.hubAhtWithoutAcw)) ?? hubAht;
+  const inbAhtWithoutAcw = parseNumber(findValue(row, acdCallsMapping.columns.inbAhtWithoutAcw)) ?? inbAht;
+  const hubHold = parseNumber(findValue(row, acdCallsMapping.columns.hubHold)) ?? 0;
+  const inbHold = parseNumber(findValue(row, acdCallsMapping.columns.inbHold)) ?? 0;
+
   return {
     ...row,
     _offered: hubReceived + inbReceived,
     _answered: hubAnswered + inbAnswered,
     _abandoned: hubAbandoned + inbAbandoned,
-    _aht: usingHub
-      ? parseNumber(findValue(row, acdCallsMapping.columns.hubAht))
-      : parseNumber(findValue(row, acdCallsMapping.columns.inbAht)),
-    _hold: usingHub
-      ? parseNumber(findValue(row, acdCallsMapping.columns.hubHold))
-      : parseNumber(findValue(row, acdCallsMapping.columns.inbHold)),
+    _aht: usingHub ? hubAht : inbAht,
+    _hold: usingHub ? hubHold : inbHold,
     _inb_received: inbReceived > 0 ? 1 : 0,
     _inb_answered: inbAnswered,
     _inb_abandoned: inbAbandoned,
-    _aht_without_acw: parseNumber(findValue(row, acdCallsMapping.columns.inbAhtWithoutAcw))
-      ?? parseNumber(findValue(row, usingHub ? acdCallsMapping.columns.hubAht : acdCallsMapping.columns.inbAht)),
+    _inb_hold: inbHold,
+    _inb_aht_without_acw: inbAhtWithoutAcw,
+    _inb_acw: Math.max(0, inbAht - inbAhtWithoutAcw),
     _hub_received: hubReceived > 0 ? 1 : 0,
     _hub_answered: hubAnswered,
     _hub_abandoned: hubAbandoned,
-    _hub_aht_without_acw: parseNumber(findValue(row, acdCallsMapping.columns.hubAhtWithoutAcw))
-      ?? parseNumber(findValue(row, acdCallsMapping.columns.hubAht)),
+    _hub_hold: hubHold,
+    _hub_aht_without_acw: hubAhtWithoutAcw,
+    _hub_acw: Math.max(0, hubAht - hubAhtWithoutAcw),
     _hub_subqueue:
       parseNumber(findValue(row, acdCallsMapping.columns.hublineIb)) === 1
         ? "IB"

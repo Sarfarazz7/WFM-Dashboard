@@ -13,6 +13,10 @@ const NAV_ITEMS = [
   { href: "/dashboard/shrinkage", label: "Shrinkage" },
   { href: "/dashboard/historical-analytics", label: "Historical" },
   { href: "/dashboard/reports", label: "Reports" },
+  { href: "/dashboard/reports/agent-inb-aht", label: "Agent INB AHT" },
+  { href: "/dashboard/reports/agent-inb-hold", label: "Agent INB Hold" },
+  { href: "/dashboard/reports/agent-hub-aht", label: "Agent HUB AHT" },
+  { href: "/dashboard/reports/agent-hub-hold", label: "Agent HUB Hold" },
   { href: "/dashboard/settings", label: "Settings" },
 ];
 

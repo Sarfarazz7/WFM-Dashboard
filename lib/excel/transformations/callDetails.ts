@@ -1,5 +1,5 @@
 import type { RawObjectRow, StandardizedExcelRow } from "../types";
-import { findValue } from "../utils";
+import { findValue, parseNumber } from "../utils";
 import { callDetailsMapping } from "../mappings";
 
 export function transformCallDetailData(row: RawObjectRow): Record<string, unknown> {
@@ -13,6 +13,7 @@ export function transformCallDetailData(row: RawObjectRow): Record<string, unkno
   return {
     _is_outbound_dialled: isOutboundDialled,
     _is_outbound_connected: isOutboundConnected,
+    _talk_time: parseNumber(findValue(row, callDetailsMapping.columns.userTalkTime)) ?? 0,
     campaign_name: campaignName || null,
     call_type: callType || null,
     system_disposition: systemDisposition || null,
