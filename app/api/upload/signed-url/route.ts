@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseClient";
+import { checkRateLimit } from "@/lib/rateLimit";
+import { SESSION_COOKIE_NAME } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 const STORAGE_BUCKET = "excel-files";
 const VALID_EXTENSIONS = [".xlsx", ".xls"];
+const SIGNED_URL_RATE_LIMIT = { maxRequests: 10, windowMs: 15 * 60 * 1000 }; // 10 URLs per 15 minutes
 
 function sanitizeFileName(raw: string): string {
   const trimmed = raw.trim();
@@ -29,6 +32,23 @@ function generateStoragePath(fileName: string): string {
 
 export async function GET(request: NextRequest) {
   try {
+    // Rate limit per session (this route is behind auth middleware)
+    const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value ?? "anonymous";
+    const rateKey = `signed-url:${sessionToken}`;
+    const limit = checkRateLimit(rateKey, SIGNED_URL_RATE_LIMIT);
+
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: "Too many upload requests. Please wait before requesting another URL." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(Math.ceil(limit.retryAfterMs / 1000)),
+          },
+        }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const rawFileName = searchParams.get("fileName");
 

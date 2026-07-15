@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { calculateAgentRanking, calculateTeamRanking } from "@/lib/services";
+import { fetchAgentNameMap, resolveName } from "@/lib/services/agentNameResolver";
 import {
   cachedJson,
   errorJson,
@@ -23,11 +24,21 @@ export async function GET(request: NextRequest) {
       agentName: query.agent,
     };
 
-    const [dailyRows, agentRanking, teamRanking] = await Promise.all([
+    const [dailyRows, agentRanking, teamRanking, nameMap] = await Promise.all([
       fetchDailySummaryRows(query),
       calculateAgentRanking(filters),
       calculateTeamRanking(filters),
+      fetchAgentNameMap(),
     ]);
+
+    const resolvedTopAgents = agentRanking.slice(0, 5).map((r) => ({
+      ...r,
+      name: resolveName(nameMap, r.name),
+    }));
+    const resolvedTopTeams = teamRanking.slice(0, 5).map((r) => ({
+      ...r,
+      name: resolveName(nameMap, r.name),
+    }));
 
     return cachedJson({
       filters,
@@ -40,8 +51,8 @@ export async function GET(request: NextRequest) {
         totalBreaks: sum(dailyRows.map((row: any) => row.total_breaks)),
       },
       trends: dailyRows,
-      topAgents: agentRanking.slice(0, 5),
-      topTeams: teamRanking.slice(0, 5),
+      topAgents: resolvedTopAgents,
+      topTeams: resolvedTopTeams,
     });
   } catch (error) {
     return errorJson(error);

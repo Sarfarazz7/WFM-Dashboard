@@ -344,7 +344,9 @@ export function processIntervalInboundRows(
     const inbReceived = numberFrom(row.data._inb_received);
     const inbAnswered = numberFrom(row.data._inb_answered);
     const inbAbandoned = numberFrom(row.data._inb_abandoned);
-    const ahtWithoutAcw = numberFrom(row.data._inb_aht_without_acw) ?? numberFrom(row.data._aht);
+    const ahtWithoutAcw = row.data._inb_aht_without_acw != null
+      ? numberFrom(row.data._inb_aht_without_acw)
+      : numberFrom(row.data._aht);
     const hubSubqueue = row.data._hub_subqueue;
 
     if (!grouped.has(hour)) {
@@ -508,7 +510,9 @@ export async function calculateIntervalInboundStatus(filters: CalculationFilters
       const inbReceived = numberFrom(row.data._inb_received);
       const inbAnswered = numberFrom(row.data._inb_answered);
       const inbAbandoned = numberFrom(row.data._inb_abandoned);
-      const ahtWithoutAcw = numberFrom(row.data._inb_aht_without_acw) ?? numberFrom(row.data._aht);
+      const ahtWithoutAcw = row.data._inb_aht_without_acw != null
+        ? numberFrom(row.data._inb_aht_without_acw)
+        : numberFrom(row.data._aht);
       const hubSubqueue = row.data._hub_subqueue;
 
       if (!grouped.has(hour)) {
@@ -687,7 +691,9 @@ export function processHubSubqueueRows(
     const hubReceived = numberFrom(row.data._hub_received);
     const hubAnswered = numberFrom(row.data._hub_answered);
     const hubAbandoned = numberFrom(row.data._hub_abandoned);
-    const ahtWithoutAcw = numberFrom(row.data._hub_aht_without_acw) ?? numberFrom(row.data._aht);
+    const ahtWithoutAcw = row.data._hub_aht_without_acw != null
+      ? numberFrom(row.data._hub_aht_without_acw)
+      : numberFrom(row.data._aht);
 
     if (!grouped.has(hour)) {
       grouped.set(hour, {
@@ -800,7 +806,9 @@ export async function calculateHubSubqueueIntervalStatus(
       const hubReceived = numberFrom(row.data._hub_received);
       const hubAnswered = numberFrom(row.data._hub_answered);
       const hubAbandoned = numberFrom(row.data._hub_abandoned);
-      const ahtWithoutAcw = numberFrom(row.data._hub_aht_without_acw) ?? numberFrom(row.data._aht);
+    const ahtWithoutAcw = row.data._hub_aht_without_acw != null
+      ? numberFrom(row.data._hub_aht_without_acw)
+      : numberFrom(row.data._aht);
 
       if (!grouped.has(hour)) {
         grouped.set(hour, {
@@ -940,7 +948,9 @@ export async function calculateAgentIntervalMatrix(
 
       switch (metric) {
         case "InbAHT":
-          metricValue = numberFrom(row.data._aht_without_acw) || numberFrom(row.data._aht);
+          metricValue = row.data._aht_without_acw != null
+            ? numberFrom(row.data._aht_without_acw)
+            : numberFrom(row.data._aht);
           weight = numberFrom(row.data._inb_answered);
           break;
         case "InbHold":
@@ -948,7 +958,9 @@ export async function calculateAgentIntervalMatrix(
           weight = numberFrom(row.data._inb_answered);
           break;
         case "HubAHT":
-          metricValue = numberFrom(row.data._hub_aht_without_acw) || numberFrom(row.data._aht);
+          metricValue = row.data._hub_aht_without_acw != null
+            ? numberFrom(row.data._hub_aht_without_acw)
+            : numberFrom(row.data._aht);
           weight = numberFrom(row.data._hub_answered);
           break;
         case "HubHold":

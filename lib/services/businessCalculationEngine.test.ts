@@ -1,7 +1,33 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+let mockQueryCallCount = 0;
+let mockQueryData: unknown[] = [];
+
+function createMockQuery() {
+  const chain: Record<string, any> = {};
+  const isFirstCall = mockQueryCallCount === 0;
+  mockQueryCallCount++;
+  const data = isFirstCall ? mockQueryData : [];
+
+  chain.select = () => chain;
+  chain.eq = () => chain;
+  chain.not = () => chain;
+  chain.range = () => chain;
+  chain.gte = () => chain;
+  chain.lte = () => chain;
+  chain.filter = () => chain;
+  chain.order = () => chain;
+  chain.then = (resolveFn: Function, rejectFn?: Function) =>
+    Promise.resolve({ data, error: null }).then(resolveFn, rejectFn);
+  chain.catch = (fn: Function) => Promise.resolve({ data, error: null }).catch(fn);
+
+  return chain;
+}
 
 vi.mock("@/lib/supabaseClient", () => ({
-  supabaseServer: {},
+  supabaseServer: {
+    from: () => createMockQuery(),
+  },
 }));
 
 import type { StoredMetricRow } from "./businessCalculationEngine";
@@ -10,6 +36,7 @@ import {
   calculateUtilizationFromRows,
   processHubSubqueueRows,
   processIntervalInboundRows,
+  calculateAgentIntervalMatrix,
 } from "./businessCalculationEngine";
 
 function makeRow(overrides: Partial<StoredMetricRow> & { data: Record<string, unknown> }): StoredMetricRow {
@@ -105,10 +132,10 @@ describe("calculateUtilizationFromRows", () => {
 describe("processHubSubqueueRows", () => {
   it("returns only rows matching the specified subqueue", () => {
     const rows = [
-      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_inb_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
-      { data: { _hub_subqueue: "IB", _hub_received: 3, _hub_answered: 3, _hub_abandoned: 0, _hub_inb_aht_without_acw: 100 }, occurred_at: "2025-07-14T10:30:00.000Z" },
-      { data: { _hub_subqueue: "DE", _hub_received: 2, _hub_answered: 2, _hub_abandoned: 0, _hub_inb_aht_without_acw: 90 }, occurred_at: "2025-07-14T10:15:00.000Z" },
-      { data: { _hub_subqueue: "DE", _hub_received: 4, _hub_answered: 3, _hub_abandoned: 1, _hub_inb_aht_without_acw: 110 }, occurred_at: "2025-07-14T11:00:00.000Z" },
+      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _hub_subqueue: "IB", _hub_received: 3, _hub_answered: 3, _hub_abandoned: 0, _hub_aht_without_acw: 100 }, occurred_at: "2025-07-14T10:30:00.000Z" },
+      { data: { _hub_subqueue: "DE", _hub_received: 2, _hub_answered: 2, _hub_abandoned: 0, _hub_aht_without_acw: 90 }, occurred_at: "2025-07-14T10:15:00.000Z" },
+      { data: { _hub_subqueue: "DE", _hub_received: 4, _hub_answered: 3, _hub_abandoned: 1, _hub_aht_without_acw: 110 }, occurred_at: "2025-07-14T11:00:00.000Z" },
     ];
 
     const result = processHubSubqueueRows(rows, "IB");
@@ -119,21 +146,26 @@ describe("processHubSubqueueRows", () => {
     // Both IB rows are at hour 10 (UTC)
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0].hour).toBe(10);
+    // Weighted AHT: (120*4 + 100*3) / (4+3) = (480+300)/7 = 111.43
+    expect(result.rows[0].avgAht).toBe(111.43);
+    expect(result.totals.avgAht).toBe(111.43);
   });
 
   it("excludes rows from other subqueues (filter leak test)", () => {
     const rows = [
-      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_inb_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
-      { data: { _hub_subqueue: "DE", _hub_received: 10, _hub_answered: 9, _hub_abandoned: 1, _hub_inb_aht_without_acw: 90 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _hub_subqueue: "DE", _hub_received: 10, _hub_answered: 9, _hub_abandoned: 1, _hub_aht_without_acw: 90 }, occurred_at: "2025-07-14T10:00:00.000Z" },
     ];
 
     const ibResult = processHubSubqueueRows(rows, "IB");
     expect(ibResult.totals.received).toBe(5); // Only IB
     expect(ibResult.totals.callCount).toBe(1);
+    expect(ibResult.totals.avgAht).toBe(120); // Only IB AHT, not blended
 
     const deResult = processHubSubqueueRows(rows, "DE");
     expect(deResult.totals.received).toBe(10); // Only DE
     expect(deResult.totals.callCount).toBe(1);
+    expect(deResult.totals.avgAht).toBe(90); // Only DE AHT
   });
 
   it("returns empty result with zero totals for no matching rows", () => {
@@ -151,6 +183,46 @@ describe("processHubSubqueueRows", () => {
     const result = processHubSubqueueRows([], "IB");
     expect(result.rows).toHaveLength(0);
     expect(result.totals.callCount).toBe(0);
+  });
+
+  it("excludes null-subqueue rows from both IB and DE buckets", () => {
+    const rows = [
+      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_aht_without_acw: 120 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _hub_subqueue: null, _hub_received: 99, _hub_answered: 99, _hub_abandoned: 99, _hub_aht_without_acw: 999 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+      { data: { _hub_subqueue: "DE", _hub_received: 3, _hub_answered: 2, _hub_abandoned: 1, _hub_aht_without_acw: 80 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+    ];
+
+    const ibResult = processHubSubqueueRows(rows, "IB");
+    expect(ibResult.totals.received).toBe(5);
+    expect(ibResult.totals.callCount).toBe(1);
+
+    const deResult = processHubSubqueueRows(rows, "DE");
+    expect(deResult.totals.received).toBe(3);
+    expect(deResult.totals.callCount).toBe(1);
+  });
+
+  it("AHT fallback: uses _hub_aht_without_acw when present, falls back to _aht when missing", () => {
+    const rowsWithHubAht = [
+      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_aht_without_acw: 150 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+    ];
+    const resultWith = processHubSubqueueRows(rowsWithHubAht, "IB");
+    expect(resultWith.totals.avgAht).toBe(150);
+
+    const rowsFallbackToAht = [
+      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _aht: 200 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+    ];
+    const resultFallback = processHubSubqueueRows(rowsFallbackToAht, "IB");
+    expect(resultFallback.totals.avgAht).toBe(200);
+  });
+
+  it("AHT zero is not nullish: _hub_aht_without_acw=0 does NOT fall back to _aht", () => {
+    const rows = [
+      { data: { _hub_subqueue: "IB", _hub_received: 5, _hub_answered: 4, _hub_abandoned: 1, _hub_aht_without_acw: 0, _aht: 999 }, occurred_at: "2025-07-14T10:00:00.000Z" },
+    ];
+    const result = processHubSubqueueRows(rows, "IB");
+    // numberFrom(0) returns 0, and 0 ?? 999 === 0 (0 is not nullish)
+    // ahtWithoutAcw = 0, condition 0 > 0 is false, so weighted AHT is not updated
+    expect(result.totals.avgAht).toBe(0);
   });
 });
 
@@ -237,5 +309,144 @@ describe("processIntervalInboundRows", () => {
     expect(result.rows[0].hubDeCount).toBe(1);
     expect(result.totals.hubIbCount).toBe(1);
     expect(result.totals.hubDeCount).toBe(1);
+  });
+
+  it("full inbound reference: hours 6-22, received totals match expected", () => {
+    const expectedReceivedByHour: Record<number, number> = {
+      6: 15, 7: 44, 8: 62, 9: 89, 10: 103, 11: 99, 12: 95,
+      13: 91, 14: 88, 15: 73, 16: 67, 17: 101, 18: 108,
+      19: 163, 20: 153, 21: 65, 22: 24,
+    };
+    const expectedGrandTotal = 1440;
+
+    const inboundRows: Array<{ data: Record<string, unknown>; occurred_at: string }> = [];
+    for (const [hourStr, count] of Object.entries(expectedReceivedByHour)) {
+      const hour = Number(hourStr);
+      inboundRows.push({
+        data: { _inb_received: count, _inb_answered: count, _inb_abandoned: 0, _inb_aht_without_acw: 100 },
+        occurred_at: `2025-07-14T${String(hour).padStart(2, "0")}:30:00.000Z`,
+      });
+    }
+
+    const result = processIntervalInboundRows(inboundRows, []);
+    expect(result.totals.received).toBe(expectedGrandTotal);
+    expect(result.rows).toHaveLength(17);
+    for (const row of result.rows) {
+      expect(row.received).toBe(expectedReceivedByHour[row.hour]);
+    }
+  });
+
+  it("no rows dropped: large fixture with >3000 rows across many hours", () => {
+    const inboundRows: Array<{ data: Record<string, unknown>; occurred_at: string }> = [];
+    const totalRows = 3500;
+    for (let i = 0; i < totalRows; i++) {
+      const hour = 6 + (i % 17); // hours 6-22
+      inboundRows.push({
+        data: { _inb_received: 1, _inb_answered: 1, _inb_abandoned: 0, _inb_aht_without_acw: 100 },
+        occurred_at: `2025-07-14T${String(hour).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}:00.000Z`,
+      });
+    }
+
+    const result = processIntervalInboundRows(inboundRows, []);
+    const totalReceived = result.rows.reduce((sum, r) => sum + r.received, 0);
+    expect(totalReceived).toBe(totalRows);
+    expect(result.totals.callCount).toBe(totalRows);
+  });
+
+  it("grand total AHT is call-count-weighted, not simple average of hourly AHTs", () => {
+    const inboundRows = [
+      // Hour 10: 100 calls at AHT=100
+      { data: { _inb_received: 100, _inb_answered: 100, _inb_abandoned: 0, _inb_aht_without_acw: 100 }, occurred_at: "2025-07-14T10:05:00.000Z" },
+      // Hour 11: 1 call at AHT=500
+      { data: { _inb_received: 1, _inb_answered: 1, _inb_abandoned: 0, _inb_aht_without_acw: 500 }, occurred_at: "2025-07-14T11:05:00.000Z" },
+    ];
+
+    const result = processIntervalInboundRows(inboundRows, []);
+    // Hourly AHTs: 100 and 500. Simple average = 300.
+    // Weighted: (100*100 + 500*1) / (100+1) = 10500/101 = 103.96
+    expect(result.totals.avgAht).toBe(103.96);
+  });
+});
+
+describe("calculateAgentIntervalMatrix", () => {
+  beforeEach(() => {
+    mockQueryCallCount = 0;
+    mockQueryData = [];
+  });
+
+  it("|| bug: _aht_without_acw=0 incorrectly creates cell with fallback _aht value", async () => {
+    mockQueryData = [
+      {
+        agent_name: "Agent1",
+        data: { _aht_without_acw: 0, _aht: 300, _inb_answered: 5 },
+        occurred_at: "2025-07-14T10:00:00.000Z",
+      },
+    ];
+
+    const result = await calculateAgentIntervalMatrix("InbAHT");
+    const cell = result.cells.find((c) => c.agent === "Agent1");
+    // With || bug: 0 || 300 = 300, so a cell IS created with metric=300 (wrong!)
+    // After fix: metricValue=0, guard `metricValue > 0` prevents cell creation (correct)
+    // This test asserts the FIXED behavior: no cell for genuine zero AHT
+    expect(cell).toBeUndefined();
+  });
+
+  it("InbAHT: uses _aht_without_acw when present and nonzero", async () => {
+    mockQueryData = [
+      {
+        agent_name: "Agent1",
+        data: { _aht_without_acw: 150, _aht: 300, _inb_answered: 5 },
+        occurred_at: "2025-07-14T10:00:00.000Z",
+      },
+    ];
+
+    const result = await calculateAgentIntervalMatrix("InbAHT");
+    const cell = result.cells.find((c) => c.agent === "Agent1");
+    expect(cell).toBeDefined();
+    expect(cell!.metric).toBe(150);
+  });
+
+  it("InbAHT: falls back to _aht when _aht_without_acw is null", async () => {
+    mockQueryData = [
+      {
+        agent_name: "Agent1",
+        data: { _aht_without_acw: null, _aht: 300, _inb_answered: 5 },
+        occurred_at: "2025-07-14T10:00:00.000Z",
+      },
+    ];
+
+    const result = await calculateAgentIntervalMatrix("InbAHT");
+    const cell = result.cells.find((c) => c.agent === "Agent1");
+    expect(cell).toBeDefined();
+    expect(cell!.metric).toBe(300);
+  });
+
+  it("HubAHT: _hub_aht_without_acw=0 does NOT create cell (no fallback)", async () => {
+    mockQueryData = [
+      {
+        agent_name: "Agent1",
+        data: { _hub_aht_without_acw: 0, _aht: 300, _hub_answered: 5 },
+        occurred_at: "2025-07-14T10:00:00.000Z",
+      },
+    ];
+
+    const result = await calculateAgentIntervalMatrix("HubAHT");
+    const cell = result.cells.find((c) => c.agent === "Agent1");
+    expect(cell).toBeUndefined();
+  });
+
+  it("HubAHT: uses _hub_aht_without_acw when present and nonzero", async () => {
+    mockQueryData = [
+      {
+        agent_name: "Agent1",
+        data: { _hub_aht_without_acw: 200, _aht: 300, _hub_answered: 5 },
+        occurred_at: "2025-07-14T10:00:00.000Z",
+      },
+    ];
+
+    const result = await calculateAgentIntervalMatrix("HubAHT");
+    const cell = result.cells.find((c) => c.agent === "Agent1");
+    expect(cell).toBeDefined();
+    expect(cell!.metric).toBe(200);
   });
 });
